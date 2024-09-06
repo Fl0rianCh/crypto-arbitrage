@@ -2,12 +2,12 @@ import ccxt
 import time
 
 # Clés API de Binance
-binance_api_key = 'TA_CLE_API_BINANCE'
-binance_secret_key = 'TON_SECRET_API_BINANCE'
+binance_api_key = 'job6FqJN3HZ0ekXO7uZ245FwCwbLbFIrz0Zrlq4pflUgXoCPw0ehmscdzNv0PGIA'
+binance_secret_key = 'pGUCIqZpKF25EBDZCokGFJbU6aI051wJEPjj0f3TkQWsiKiW2nEgN9nV7Op4D1Ns'
 
 # Clés API de KuCoin (facultatif si tu ne l'utilises pas pour l'instant)
-kucoin_api_key = 'TA_CLE_API_KUCOIN'
-kucoin_secret_key = 'TON_SECRET_API_KUCOIN'
+kucoin_api_key = '66db75000a48170001a2a302'
+kucoin_secret_key = '958f9568-57c4-4804-8a43-dacfdcf07591'
 
 # Connexion à Binance
 binance = ccxt.binance({
