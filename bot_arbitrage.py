@@ -115,15 +115,22 @@ def get_balances():
 # Fonction principale d'arbitrage avec réinvestissement automatique
 def arbitrage():
     # Envoyer un message au démarrage du bot
-    send_telegram_message("Le bot a démarré !")
-    logger.info("Le bot a démarré !")
+    send_telegram_message("Le bot d'arbitrage est maintenant en ligne et prêt à analyser les marchés.")
+    logger.info("Le bot d'arbitrage a démarré !")
     
     while True:
         try:
-            # Récupérer les prix actuels sur Binance et KuCoin
-            binance_price = binance.fetch_ticker('BTC/USDT')['last']
+            # Récupérer les prix actuels sur Binance et KuCoin avec gestion des erreurs
+            try:
+                binance_price = binance.fetch_ticker('BTC/USDT')['last']
+                logger.info(f"Prix sur Binance : {binance_price}")
+            except Exception as e:
+                logger.error(f"Erreur lors de la récupération du prix sur Binance : {e}")
+                send_telegram_message(f"Erreur lors de la récupération du prix sur Binance : {e}")
+                continue  # Continue le cycle si une erreur se produit
+
             kucoin_price = kucoin.fetch_ticker('BTC/USDT')['last']
-            logger.info(f"Prix sur Binance : {binance_price}, Prix sur KuCoin : {kucoin_price}")
+            logger.info(f"Prix sur KuCoin : {kucoin_price}")
 
             # Récupérer les soldes actuels sur les deux plateformes
             binance_balance, kucoin_balance = get_balances()
