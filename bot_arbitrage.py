@@ -2,6 +2,7 @@ import ccxt
 import requests
 import time
 import logging
+from logging.handlers import TimedRotatingFileHandler
 
 # Configuration API Binance
 binance_api_key = 'job6FqJN3HZ0ekXO7uZ245FwCwbLbFIrz0Zrlq4pflUgXoCPw0ehmscdzNv0PGIA'
@@ -33,8 +34,14 @@ min_price_difference = 10  # Seuil minimum de différence de prix en USDT
 trading_fee = 0.001  # 0,1% de frais de transaction
 stop_loss_percentage = 0.005  # Stop-loss à 0,5% sous le prix d'achat
 
-# Logger pour suivre l'activité
-logging.basicConfig(filename="bot_log.log", level=logging.INFO, format="%(asctime)s %(message)s")
+# Logger pour suivre l'activité et éviter la surcharge
+log_formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+log_handler = TimedRotatingFileHandler("bot_log.log", when="midnight", interval=1, backupCount=2)
+log_handler.setFormatter(log_formatter)
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+logger.addHandler(log_handler)
 
 # Fonction pour envoyer un message sur Telegram
 def send_telegram_message(message):
@@ -43,9 +50,9 @@ def send_telegram_message(message):
     try:
         response = requests.post(url, data=payload)
         if response.status_code != 200:
-            logging.error(f"Erreur d'envoi de la notification Telegram : {response.status_code}")
+            logger.error(f"Erreur d'envoi de la notification Telegram : {response.status_code}")
     except Exception as e:
-        logging.error(f"Exception lors de l'envoi de la notification Telegram : {e}")
+        logger.error(f"Exception lors de l'envoi de la notification Telegram : {e}")
 
 # Calculer les frais de transaction
 def calculate_fees(price):
@@ -70,19 +77,19 @@ def calculate_profit(buy_price, sell_price, amount_traded):
 def buy_on_kucoin(amount, price):
     try:
         kucoin.create_limit_buy_order('BTC/USDT', amount, price)
-        logging.info(f"Achat de {amount} BTC à {price} USDT sur KuCoin")
+        logger.info(f"Achat de {amount} BTC à {price} USDT sur KuCoin")
         send_telegram_message(f"Achat exécuté sur KuCoin : {amount} BTC à {price} USDT")
     except Exception as e:
-        logging.error(f"Erreur lors de l'achat sur KuCoin : {e}")
+        logger.error(f"Erreur lors de l'achat sur KuCoin : {e}")
 
 # Vendre sur Binance
 def sell_on_binance(amount, price):
     try:
         binance.create_limit_sell_order('BTC/USDT', amount, price)
-        logging.info(f"Vente de {amount} BTC à {price} USDT sur Binance")
+        logger.info(f"Vente de {amount} BTC à {price} USDT sur Binance")
         send_telegram_message(f"Vente exécutée sur Binance : {amount} BTC à {price} USDT")
     except Exception as e:
-        logging.error(f"Erreur lors de la vente sur Binance : {e}")
+        logger.error(f"Erreur lors de la vente sur Binance : {e}")
 
 # Fonction pour calculer le montant à investir en fonction des soldes disponibles
 def calculate_trade_amount(kucoin_balance, kucoin_price):
@@ -95,7 +102,7 @@ def calculate_trade_amount(kucoin_balance, kucoin_price):
     
     # Vérifier si le trade_amount est supérieur à un minimum pour éviter les petites transactions
     if trade_amount < 0.001:  # Par exemple, 0.001 BTC comme minimum
-        logging.info(f"Montant à trader trop faible : {trade_amount} BTC, aucune transaction")
+        logger.info(f"Montant à trader trop faible : {trade_amount} BTC, aucune transaction")
         return 0
     return trade_amount
 
@@ -107,11 +114,16 @@ def get_balances():
 
 # Fonction principale d'arbitrage avec réinvestissement automatique
 def arbitrage():
+    # Envoyer un message au démarrage du bot
+    send_telegram_message("Le bot a démarré !")
+    logger.info("Le bot a démarré !")
+    
     while True:
         try:
             # Récupérer les prix actuels sur Binance et KuCoin
             binance_price = binance.fetch_ticker('BTC/USDT')['last']
             kucoin_price = kucoin.fetch_ticker('BTC/USDT')['last']
+            logger.info(f"Prix sur Binance : {binance_price}, Prix sur KuCoin : {kucoin_price}")
 
             # Récupérer les soldes actuels sur les deux plateformes
             binance_balance, kucoin_balance = get_balances()
@@ -122,13 +134,17 @@ def arbitrage():
             # Si le montant est suffisant, effectuer l'arbitrage
             if amount_to_trade > 0:
                 if is_arbitrage_opportunity(kucoin_price, binance_price):
+                    logger.info("Opportunité d'arbitrage détectée")
                     # Exécuter l'achat et la vente
                     buy_on_kucoin(amount_to_trade, kucoin_price)
                     sell_on_binance(amount_to_trade, binance_price)
 
                     # Calculer et envoyer le profit réalisé
                     profit, fees_buy, fees_sell = calculate_profit(kucoin_price, binance_price, amount_to_trade)
+                    logger.info(f"Profit net : {profit} USDT, Frais d'achat : {fees_buy}, Frais de vente : {fees_sell}")
                     send_telegram_message(f"Arbitrage effectué !\nProfit net : {profit} USDT\nFrais d'achat : {fees_buy} USDT\nFrais de vente : {fees_sell} USDT")
+                else:
+                    logger.info("Pas d'opportunité d'arbitrage détectée")
 
             # Afficher les soldes après l'exécution des ordres
             send_telegram_message(f"Soldes après arbitrage : Binance = {binance_balance['total']['BTC']} BTC, KuCoin = {kucoin_balance['total']['USDT']} USDT")
@@ -137,7 +153,7 @@ def arbitrage():
             time.sleep(60)  # Pause de 60 secondes
 
         except Exception as e:
-            logging.error(f"Erreur dans le processus d'arbitrage : {e}")
+            logger.error(f"Erreur dans le processus d'arbitrage : {e}")
 
 # Lancer le bot d'arbitrage
 arbitrage()
