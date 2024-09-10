@@ -26,7 +26,7 @@ binance = ccxt.binance({
 kucoin = ccxt.kucoin({
     'apiKey': kucoin_api_key,
     'secret': kucoin_secret_key,
-    'password': '131093',
+    'password': 'yD13A5fc18102023$',
     'enableRateLimit': True
 })
 
