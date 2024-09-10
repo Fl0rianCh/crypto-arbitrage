@@ -9,8 +9,8 @@ binance_api_key = 'job6FqJN3HZ0ekXO7uZ245FwCwbLbFIrz0Zrlq4pflUgXoCPw0ehmscdzNv0P
 binance_secret_key = 'pGUCIqZpKF25EBDZCokGFJbU6aI051wJEPjj0f3TkQWsiKiW2nEgN9nV7Op4D1Ns'
 
 # Configuration API KuCoin
-kucoin_api_key = '66db75000a48170001a2a302'
-kucoin_secret_key = '958f9568-57c4-4804-8a43-dacfdcf07591'
+kucoin_api_key = '66dffc92e72ff9000190a3ae'
+kucoin_secret_key = '786adb6d-03a4-464e-8ed3-15330dc48fc5'
 
 # Configuration Telegram
 telegram_token = '7501427979:AAE-r03vaNZjuATvSL5FUdAHqn2BjwV0Gok'
