@@ -31,7 +31,7 @@ kucoin = ccxt.kucoin({
 })
 
 # Configuration du bot
-min_price_difference = 10  # Seuil minimum de différence de prix en USDT
+min_price_difference = 8  # Seuil minimum de différence de prix en USDT
 trading_fee = 0.001  # 0,1% de frais de transaction
 stop_loss_percentage = 0.005  # Stop-loss à 0,5% sous le prix d'achat
 
@@ -44,22 +44,24 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 logger.addHandler(log_handler)
 
-# Calculer les frais de transaction
-def calculate_fees(price):
-    return price * trading_fee
+# Calculer les frais de transaction sur le montant investi
+def calculate_fees(amount_traded, price):
+    # Les frais sont calculés sur le montant total de la transaction (prix * quantité)
+    total_amount = amount_traded * price
+    return total_amount * trading_fee
 
 # Vérifier si une opportunité d'arbitrage est disponible
 def is_arbitrage_opportunity(buy_price, sell_price):
-    buy_price_with_fees = buy_price + calculate_fees(buy_price)
-    sell_price_with_fees = sell_price - calculate_fees(sell_price)
+    buy_price_with_fees = buy_price + calculate_fees(1, buy_price)  # Correction ici
+    sell_price_with_fees = sell_price - calculate_fees(1, sell_price)  # Correction ici
     return (sell_price_with_fees - buy_price_with_fees) > min_price_difference
 
 # Calculer les profits
 def calculate_profit(buy_price, sell_price, amount_traded):
     buy_cost = buy_price * amount_traded
     sell_income = sell_price * amount_traded
-    fees_buy = calculate_fees(buy_cost)
-    fees_sell = calculate_fees(sell_income)
+    fees_buy = calculate_fees(amount_traded, buy_price)
+    fees_sell = calculate_fees(amount_traded, sell_price)
     profit = (sell_income - fees_sell) - (buy_cost + fees_buy)
     return profit, fees_buy, fees_sell
 
