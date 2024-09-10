@@ -113,15 +113,12 @@ def get_balances():
     binance_balance = binance.fetch_balance()
     kucoin_balance = kucoin.fetch_balance()
 
-    # Loguer les soldes complets pour vérifier le format exact des données
-    logger.info(f"Réponse complète des soldes Binance : {binance_balance}")
-    logger.info(f"Réponse complète des soldes KuCoin : {kucoin_balance}")
-    
-    # Affichage des clés pour vérifier les éléments disponibles
-    logger.info(f"Clés disponibles dans Binance : {binance_balance.keys()}")
-    logger.info(f"Clés disponibles dans KuCoin : {kucoin_balance.keys()}")
+    # Loguer uniquement les soldes pertinents pour le trading
+    logger.info(f"Solde Binance (BTC) : {binance_balance['total'].get('BTC', 0)} BTC")
+    logger.info(f"Solde KuCoin (USDT) : {kucoin_balance['total'].get('USDT', 0)} USDT")
     
     return binance_balance, kucoin_balance
+
 
 # Fonction principale d'arbitrage avec réinvestissement automatique
 def arbitrage():
