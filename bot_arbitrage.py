@@ -112,10 +112,14 @@ def calculate_trade_amount(kucoin_balance, kucoin_price):
 def get_balances():
     binance_balance = binance.fetch_balance()
     kucoin_balance = kucoin.fetch_balance()
+
+    # Loguer les soldes complets pour vérifier le format exact des données
+    logger.info(f"Réponse complète des soldes Binance : {binance_balance}")
+    logger.info(f"Réponse complète des soldes KuCoin : {kucoin_balance}")
     
-    # Log les soldes pour vérifier les données
-    logger.info(f"Soldes Binance : {binance_balance}")
-    logger.info(f"Soldes KuCoin : {kucoin_balance}")
+    # Affichage des clés pour vérifier les éléments disponibles
+    logger.info(f"Clés disponibles dans Binance : {binance_balance.keys()}")
+    logger.info(f"Clés disponibles dans KuCoin : {kucoin_balance.keys()}")
     
     return binance_balance, kucoin_balance
 
