@@ -95,7 +95,8 @@ def sell_on_binance(amount, price):
 # Fonction pour calculer le montant à investir en fonction des soldes disponibles
 def calculate_trade_amount(kucoin_balance, kucoin_price):
     # Utiliser l'USDT disponible sur KuCoin pour calculer combien de BTC acheter
-    usdt_available_kucoin = kucoin_balance['total']['USDT']
+    usdt_available_kucoin = kucoin_balance['total'].get('USDT', 0)  # Utilise .get pour éviter l'erreur
+    logger.info(f"USDT disponible sur KuCoin : {usdt_available_kucoin} USDT")
     
     # Allouer un pourcentage du solde USDT disponible pour l'achat
     capital_allocation_percentage = 0.1  # Utiliser 10% du capital disponible, ajustable
@@ -111,6 +112,11 @@ def calculate_trade_amount(kucoin_balance, kucoin_price):
 def get_balances():
     binance_balance = binance.fetch_balance()
     kucoin_balance = kucoin.fetch_balance()
+    
+    # Log les soldes pour vérifier les données
+    logger.info(f"Soldes Binance : {binance_balance}")
+    logger.info(f"Soldes KuCoin : {kucoin_balance}")
+    
     return binance_balance, kucoin_balance
 
 # Fonction principale d'arbitrage avec réinvestissement automatique
