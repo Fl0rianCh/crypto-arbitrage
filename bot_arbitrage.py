@@ -101,6 +101,21 @@ def get_balances():
 
     return binance_balance, kucoin_balance
 
+# Fonction pour calculer le montant à investir en fonction des soldes disponibles
+def calculate_trade_amount(kucoin_balance, kucoin_price):
+    # Utiliser l'USDT disponible sur KuCoin pour calculer combien de BTC acheter
+    usdt_available_kucoin = kucoin_balance['total'].get('USDT', 0)
+    
+    # Allouer un pourcentage du solde USDT disponible pour l'achat
+    capital_allocation_percentage = 0.5  # Utiliser 50% du capital disponible
+    trade_amount = (usdt_available_kucoin * capital_allocation_percentage) / kucoin_price
+    
+    # Vérifier si le trade_amount est supérieur à un minimum pour éviter les petites transactions
+    if trade_amount < 0.001:  # Par exemple, 0.001 BTC comme minimum
+        logger.info(f"Montant à trader trop faible : {trade_amount} BTC, aucune transaction")
+        return 0
+    return trade_amount
+
 # Fonction principale d'arbitrage avec réinvestissement automatique
 def arbitrage():
     logger.info("Le bot d'arbitrage a démarré !")
