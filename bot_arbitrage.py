@@ -99,7 +99,7 @@ def calculate_trade_amount(kucoin_balance, kucoin_price):
     logger.info(f"USDT disponible sur KuCoin : {usdt_available_kucoin} USDT")
     
     # Allouer un pourcentage du solde USDT disponible pour l'achat
-    capital_allocation_percentage = 0.1  # Utiliser 10% du capital disponible, ajustable
+    capital_allocation_percentage = 0.5  # Utiliser 50% du capital disponible, ajustable
     trade_amount = (usdt_available_kucoin * capital_allocation_percentage) / kucoin_price
     
     # Vérifier si le trade_amount est supérieur à un minimum pour éviter les petites transactions
