@@ -90,6 +90,17 @@ def sell_on_binance(amount, price):
     except Exception as e:
         logger.error(f"Erreur lors de la vente sur Binance : {e}")
 
+# Fonction pour récupérer les soldes sur chaque plateforme
+def get_balances():
+    binance_balance = binance.fetch_balance()
+    kucoin_balance = kucoin.fetch_balance()
+
+    # Log les soldes pour vérifier les données
+    logger.info(f"Solde Binance (BTC) : {binance_balance['total'].get('BTC', 0)} BTC")
+    logger.info(f"Solde KuCoin (USDT) : {kucoin_balance['total'].get('USDT', 0)} USDT")
+
+    return binance_balance, kucoin_balance
+
 # Fonction principale d'arbitrage avec réinvestissement automatique
 def arbitrage():
     logger.info("Le bot d'arbitrage a démarré !")
