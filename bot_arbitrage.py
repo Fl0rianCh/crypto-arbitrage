@@ -32,7 +32,7 @@ kucoin = ccxt.kucoin({
 })
 
 # Configuration du bot
-min_price_difference = 8  # Seuil minimum de différence de prix en USDT
+min_price_difference = 0.0005  # Seuil minimum de différence de prix en USDT ajusté
 trading_fee_binance = 0.00075  # 0,075% de frais sur Binance
 trading_fee_kucoin = 0.001  # 0,1% de frais sur KuCoin
 stop_loss_percentage = 0.005  # Stop-loss à 0,5% sous le prix d'achat
