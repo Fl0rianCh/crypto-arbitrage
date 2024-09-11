@@ -113,10 +113,13 @@ def get_balances():
 # Fonction pour calculer le montant à investir en fonction des soldes disponibles
 def calculate_trade_amount(kucoin_balance, kucoin_price):
     usdt_available_kucoin = kucoin_balance['total'].get('USDT', 0)
+    
+    # Allouer un pourcentage du solde USDT disponible pour l'achat
     capital_allocation_percentage = 0.5  # Utiliser 50% du capital disponible
     trade_amount = (usdt_available_kucoin * capital_allocation_percentage) / kucoin_price
     
-    if trade_amount < 0.001:  # Limite minimum pour XRP
+    # Vérifier si le trade_amount est supérieur à un minimum pour éviter les petites transactions
+    if trade_amount < 1:  # Par exemple, 1 XRP comme minimum
         logger.info(f"Montant à trader trop faible : {trade_amount} XRP, aucune transaction")
         return 0
     return trade_amount
