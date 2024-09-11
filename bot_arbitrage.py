@@ -163,7 +163,7 @@ def arbitrage():
                 send_telegram_message("Le bot XRP fonctionne correctement.")
                 start_time = time.time()
 
-            time.sleep(30)  # Pause de 60 secondes
+            time.sleep(30)  # Pause de 30 secondes
 
         except Exception as e:
             logger.error(f"Erreur dans le processus d'arbitrage : {e}")
