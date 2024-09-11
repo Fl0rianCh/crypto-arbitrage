@@ -69,6 +69,10 @@ def calculate_fees(amount_traded, price, platform):
 def is_arbitrage_opportunity(buy_price, sell_price):
     buy_price_with_fees = buy_price + calculate_fees(1, buy_price, 'kucoin')
     sell_price_with_fees = sell_price - calculate_fees(1, sell_price, 'binance')
+
+    # Ajouter un log pour afficher les prix avec frais
+    logger.info(f"Prix achat avec frais : {buy_price_with_fees}, Prix vente avec frais : {sell_price_with_fees}")
+
     return (sell_price_with_fees - buy_price_with_fees) > min_price_difference
 
 # Calculer les profits
