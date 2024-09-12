@@ -2,6 +2,7 @@ import ccxt
 import requests
 import time
 import logging
+import numpy as np  # Pour calculer la volatilité
 from logging.handlers import TimedRotatingFileHandler
 from datetime import datetime
 
@@ -42,14 +43,14 @@ kraken = ccxt.kraken({
 })
 
 # Configuration du bot
-min_price_difference = 0.0005  # Seuil minimum de différence de prix en USDT ajusté
+min_price_difference = 0.0002  # Seuil minimum de différence de prix en USDT ajusté
 trading_fee_binance = 0.00075  # 0,075% de frais sur Binance
 trading_fee_kucoin = 0.001  # 0,1% de frais sur KuCoin
 trading_fee_kraken = 0.0016  # 0,16% de frais sur Kraken
 stop_loss_percentage = 0.005  # Stop-loss à 0,5% sous le prix d'achat
 
 # Logger pour suivre l'activité et éviter la surcharge
-log_formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+log_formatter = logging.Formatter("%(asctime)s - %(levellevel)s - %(message)s")
 log_handler = TimedRotatingFileHandler("bot_log.log", when="midnight", interval=1, backupCount=2)
 log_handler.setFormatter(log_formatter)
 
@@ -57,6 +58,8 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 logger.addHandler(log_handler)
 
+# Suivi des prix pour la volatilité
+price_history = []
 
 # Fonction pour envoyer un message sur Telegram
 def send_telegram_message(message):
@@ -70,17 +73,44 @@ def send_telegram_message(message):
         logger.error(f"Exception lors de l'envoi de la notification Telegram : {e}")
 
 # Calculer les frais de transaction sur Binance, KuCoin et Kraken
-def calculate_fees(amount_traded, price, platform):
+def calculate_fees(amount_traded, price, platform, use_token=False):
     total_amount = amount_traded * price
     if platform == 'binance':
-        return total_amount * trading_fee_binance
+        return optimize_fees_with_token('binance', amount_traded, price, use_token)
     elif platform == 'kucoin':
-        return total_amount * trading_fee_kucoin
+        return optimize_fees_with_token('kucoin', amount_traded, price, use_token)
     elif platform == 'kraken':
         return total_amount * trading_fee_kraken
 
+# Optimiser les frais avec tokens natifs (BNB/KCS)
+def optimize_fees_with_token(platform, amount_traded, price, use_token=False):
+    if platform == 'binance' and use_token:
+        fee_rate = 0.0005  # Frais réduits si paiement en BNB
+    elif platform == 'kucoin' and use_token:
+        fee_rate = 0.0008  # Frais réduits avec KCS
+    else:
+        fee_rate = trading_fee_binance if platform == 'binance' else trading_fee_kucoin
+
+    total_fees = amount_traded * price * fee_rate
+    return total_fees
+
+# Calculer la volatilité sur l'historique des prix
+def calculate_volatility(prices):
+    return np.std(prices) / np.mean(prices)
+
+# Ajustement dynamique du sleep en fonction de la volatilité
+def dynamic_sleep(volatility):
+    if volatility > 0.02:  # Ajuster le seuil
+        return 5  # Pause réduite en cas de forte volatilité
+    else:
+        return 10  # Pause normale
+
+# Calcul dynamique du seuil de profit minimal en fonction de la volatilité
+def calculate_dynamic_price_difference(volatility, base_min_difference=0.0005):
+    return base_min_difference * (1 + volatility)
+
 # Vérifier si une opportunité d'arbitrage est disponible entre 3 exchanges
-def is_arbitrage_opportunity(buy_price, sell_price, buy_platform, sell_platform):
+def is_arbitrage_opportunity(buy_price, sell_price, buy_platform, sell_platform, min_price_difference):
     buy_price_with_fees = buy_price + calculate_fees(1, buy_price, buy_platform)
     sell_price_with_fees = sell_price - calculate_fees(1, sell_price, sell_platform)
 
@@ -88,8 +118,7 @@ def is_arbitrage_opportunity(buy_price, sell_price, buy_platform, sell_platform)
     logger.info(f"Prix achat avec frais ({buy_platform}) : {buy_price_with_fees}, Prix vente avec frais ({sell_platform}) : {sell_price_with_fees}")
 
     return (sell_price_with_fees - buy_price_with_fees) > min_price_difference
-
-# Calculer les profits avec logging
+    # Calculer les profits avec logging
 def calculate_profit(buy_price, sell_price, amount_traded, buy_platform, sell_platform):
     buy_cost = buy_price * amount_traded
     sell_income = sell_price * amount_traded
@@ -172,24 +201,26 @@ def arbitrage():
         try:
             # Récupérer les prix actuels sur Binance, KuCoin et Kraken
             binance_price = binance.fetch_ticker('XRP/USDT')['last']
-            logger.info(f"Prix sur Binance : {binance_price}")
-            
             kucoin_price = kucoin.fetch_ticker('XRP/USDT')['last']
-            logger.info(f"Prix sur KuCoin : {kucoin_price}")
-            
             kraken_price = kraken.fetch_ticker('XRP/USDT')['last']
-            logger.info(f"Prix sur Kraken : {kraken_price}")
-
-            # Comparer les opportunités d'arbitrage entre Binance, KuCoin et Kraken
-            binance_balance, kucoin_balance, kraken_balance = get_balances()
             
+            price_history.append((binance_price + kucoin_price + kraken_price) / 3)  # Ajouter les prix dans l'historique
+            if len(price_history) > 20:
+                price_history.pop(0)  # Limiter l'historique à 20 points
+
+            volatility = calculate_volatility(price_history)  # Calculer la volatilité
+
+            min_price_difference_dynamic = calculate_dynamic_price_difference(volatility, base_min_difference=0.0005)
+
+            binance_balance, kucoin_balance, kraken_balance = get_balances()
+
             # Calculer le montant à trader en utilisant les soldes disponibles
             amount_to_trade_kucoin = calculate_trade_amount(kucoin_balance, kucoin_price, 'kucoin')
             amount_to_trade_binance = calculate_trade_amount(binance_balance, binance_price, 'binance')
             amount_to_trade_kraken = calculate_trade_amount(kraken_balance, kraken_price, 'kraken')
 
             # Vérification des montants minimums et arbitrage KuCoin -> Binance
-            if amount_to_trade_kucoin > 0 and is_arbitrage_opportunity(kucoin_price, binance_price, 'kucoin', 'binance'):
+            if amount_to_trade_kucoin > 0 and is_arbitrage_opportunity(kucoin_price, binance_price, 'kucoin', 'binance', min_price_difference_dynamic):
                 logger.info("Opportunité d'arbitrage KuCoin -> Binance détectée")
                 buy_on_kucoin(amount_to_trade_kucoin, kucoin_price)
                 sell_on_binance(amount_to_trade_kucoin, binance_price)
@@ -200,7 +231,7 @@ def arbitrage():
                 send_telegram_message(f"Arbitrage KuCoin -> Binance: Profit de {profit:.2f} USDT")
 
             # Arbitrage Kraken -> Binance
-            elif amount_to_trade_kraken > 0 and is_arbitrage_opportunity(kraken_price, binance_price, 'kraken', 'binance'):
+            elif amount_to_trade_kraken > 0 and is_arbitrage_opportunity(kraken_price, binance_price, 'kraken', 'binance', min_price_difference_dynamic):
                 logger.info("Opportunité d'arbitrage Kraken -> Binance détectée")
                 buy_on_kraken(amount_to_trade_kraken, kraken_price)
                 sell_on_binance(amount_to_trade_kraken, binance_price)
@@ -211,7 +242,7 @@ def arbitrage():
                 send_telegram_message(f"Arbitrage Kraken -> Binance: Profit de {profit:.2f} USDT")
 
             # Arbitrage KuCoin -> Kraken
-            elif amount_to_trade_kucoin > 0 and is_arbitrage_opportunity(kucoin_price, kraken_price, 'kucoin', 'kraken'):
+            elif amount_to_trade_kucoin > 0 and is_arbitrage_opportunity(kucoin_price, kraken_price, 'kucoin', 'kraken', min_price_difference_dynamic):
                 logger.info("Opportunité d'arbitrage KuCoin -> Kraken détectée")
                 buy_on_kucoin(amount_to_trade_kucoin, kucoin_price)
                 sell_on_kraken(amount_to_trade_kucoin, kraken_price)
@@ -226,7 +257,7 @@ def arbitrage():
                 send_telegram_message("Le bot XRP fonctionne correctement.")
                 start_time = time.time()
 
-            time.sleep(30)  # Pause de 30 secondes entre chaque cycle
+            time.sleep(dynamic_sleep(volatility))  # Ajuster le temps de pause en fonction de la volatilité
 
         except Exception as e:
             logger.error(f"Erreur dans le processus d'arbitrage : {e}")
