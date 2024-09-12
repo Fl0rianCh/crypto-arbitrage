@@ -56,6 +56,23 @@ ideal_allocation = {
     'kucoin': {'XRP': 14, 'USDT': 21}
 }
 
+# Fonction pour récupérer les soldes sur chaque plateforme
+def get_balances():
+    try:
+        binance_balance = binance.fetch_balance()
+        kucoin_balance = kucoin.fetch_balance()
+        kraken_balance = kraken.fetch_balance()
+
+        logger.info(f"Solde Binance (XRP): {binance_balance['total'].get('XRP', 0)} XRP, {binance_balance['total'].get('USDT', 0)} USDT")
+        logger.info(f"Solde KuCoin (XRP): {kucoin_balance['total'].get('XRP', 0)} XRP, {kucoin_balance['total'].get('USDT', 0)} USDT")
+        logger.info(f"Solde Kraken (XRP): {kraken_balance['total'].get('XRP', 0)} XRP, {kraken_balance['total'].get('USDT', 0)} USDT")
+
+        return binance_balance, kucoin_balance, kraken_balance
+    except Exception as e:
+        logger.error(f"Erreur lors de la récupération des soldes : {e}")
+        send_telegram_message(f"Erreur lors de la récupération des soldes : {e}")
+        return None, None, None
+
 # Logger pour suivre l'activité et éviter la surcharge
 log_formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
 log_handler = TimedRotatingFileHandler("bot_log.log", when="midnight", interval=1, backupCount=2)
