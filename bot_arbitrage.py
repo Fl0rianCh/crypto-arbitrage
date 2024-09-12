@@ -49,7 +49,7 @@ trading_fee_kraken = 0.0016  # 0,16% de frais sur Kraken
 stop_loss_percentage = 0.005  # Stop-loss à 0,5% sous le prix d'achat
 
 # Logger pour suivre l'activité et éviter la surcharge
-log_formatter = logging.Formatter("%(asctime)s - %(levellevel)s - %(message)s")
+log_formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
 log_handler = TimedRotatingFileHandler("bot_log.log", when="midnight", interval=1, backupCount=2)
 log_handler.setFormatter(log_formatter)
 
