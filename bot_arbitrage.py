@@ -126,7 +126,7 @@ def rebalance_portfolios(binance_balance, kucoin_balance, kraken_balance, binanc
         transfer_xrp('kucoin', 'kraken', delta_kraken_xrp)
     if delta_kraken_usdt > 0:
         transfer_usdt('kucoin', 'kraken', delta_kraken_usdt)
-
+    
     if delta_kucoin_xrp > 0:
         transfer_xrp('binance', 'kucoin', delta_kucoin_xrp)
     if delta_kucoin_usdt > 0:
@@ -168,6 +168,14 @@ def transfer_usdt(from_platform, to_platform, amount):
     except Exception as e:
         logger.error(f"Erreur lors du transfert de USDT : {e}")
         send_telegram_message(f"Erreur lors du transfert de USDT de {from_platform} à {to_platform} : {e}")
+
+# Fonction pour calculer la volatilité sur l'historique des prix
+def calculate_volatility(prices):
+    return np.std(prices) / np.mean(prices)
+
+# Fonction pour ajuster dynamiquement le seuil de profit minimal en fonction de la volatilité
+def calculate_dynamic_price_difference(volatility, base_min_difference=0.0005):
+    return base_min_difference * (1 + volatility)
 
 # Fonction principale d'arbitrage avec réinvestissement automatique et rééquilibrage
 def arbitrage():
@@ -244,7 +252,7 @@ def arbitrage():
                 send_telegram_message("Le bot XRP fonctionne correctement.")
                 start_time = time.time()
 
-            time.sleep(dynamic_sleep(volatility))  # Ajuster le temps de pause en fonction de la volatilité
+            time.sleep(10)  # Ajuster le temps de pause (en secondes)
 
         except Exception as e:
             logger.error(f"Erreur dans le processus d'arbitrage : {e}")
