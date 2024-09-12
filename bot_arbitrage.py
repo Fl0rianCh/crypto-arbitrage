@@ -194,6 +194,19 @@ def calculate_volatility(prices):
 def calculate_dynamic_price_difference(volatility, base_min_difference=0.0005):
     return base_min_difference * (1 + volatility)
 
+# Fonction pour calculer le montant à investir en fonction des soldes disponibles
+def calculate_trade_amount(balance, price, platform):
+    available_balance = balance['total'].get('USDT' if platform == 'kucoin' else 'XRP', 0)
+    
+    # Allouer un pourcentage du solde disponible pour l'achat
+    capital_allocation_percentage = 0.5  # Utiliser 50% du capital disponible
+    trade_amount = (available_balance * capital_allocation_percentage) / price if platform == 'kucoin' else available_balance * capital_allocation_percentage
+    
+    if trade_amount <= 0:
+        logger.info(f"Montant à trader trop faible : {trade_amount} {platform}, aucune transaction.")
+        return 0
+    return trade_amount
+
 # Fonction principale d'arbitrage avec réinvestissement automatique et rééquilibrage
 def arbitrage():
     logger.info("Le bot d'arbitrage a démarré !")
