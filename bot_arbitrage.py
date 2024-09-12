@@ -207,6 +207,18 @@ def calculate_trade_amount(balance, price, platform):
         return 0
     return trade_amount
 
+# Fonction pour vérifier si une opportunité d'arbitrage est disponible
+def is_arbitrage_opportunity(buy_price, sell_price, buy_platform, sell_platform, min_price_difference):
+    # Calcul des prix avec les frais inclus
+    buy_price_with_fees = buy_price + calculate_fees(1, buy_price, buy_platform)
+    sell_price_with_fees = sell_price - calculate_fees(1, sell_price, sell_platform)
+
+    # Ajouter un log pour afficher les prix avec frais
+    logger.info(f"Prix achat avec frais ({buy_platform}) : {buy_price_with_fees}, Prix vente avec frais ({sell_platform}) : {sell_price_with_fees}")
+
+    # Vérifier si la différence entre le prix de vente et le prix d'achat dépasse le seuil minimal
+    return (sell_price_with_fees - buy_price_with_fees) > min_price_difference
+
 # Fonction principale d'arbitrage avec réinvestissement automatique et rééquilibrage
 def arbitrage():
     logger.info("Le bot d'arbitrage a démarré !")
