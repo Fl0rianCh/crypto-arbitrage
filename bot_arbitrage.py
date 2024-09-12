@@ -43,7 +43,7 @@ kraken = ccxt.kraken({
 })
 
 # Configuration du bot
-min_price_difference = 0.0002  # Seuil minimum de différence de prix en USDT ajusté
+min_price_difference = 0.0005  # Seuil minimum de différence de prix en USDT ajusté
 trading_fee_binance = 0.00075  # 0,075% de frais sur Binance
 trading_fee_kucoin = 0.001  # 0,1% de frais sur KuCoin
 trading_fee_kraken = 0.0016  # 0,16% de frais sur Kraken
