@@ -80,22 +80,30 @@ ideal_allocation = {
 
 # Fonction pour récupérer les soldes sur chaque plateforme
 def get_balances():
-    try:
-        binance_balance = binance.fetch_balance()
-        kucoin_balance = kucoin.fetch_balance()
-        kraken_balance = kraken.fetch_balance()
+    retries = 0
+    max_retries = 3  # Nombre maximum de tentatives de reconnexion
+    delay = 5  # Délai entre chaque tentative
 
-        logger.info(f"Solde Binance (XRP): {binance_balance['total'].get('XRP', 0)} XRP, {binance_balance['total'].get('USDC', 0)} USDC")
-        logger.info(f"Solde KuCoin (XRP): {kucoin_balance['total'].get('XRP', 0)} XRP, {kucoin_balance['total'].get('USDC', 0)} USDC")
-        logger.info(f"Solde Kraken (XRP): {kraken_balance['total'].get('XRP', 0)} XRP, {kraken_balance['total'].get('USDC', 0)} USDC")
+    while retries < max_retries:
+        try:
+            binance_balance = binance.fetch_balance()
+            kucoin_balance = kucoin.fetch_balance()
+            kraken_balance = kraken.fetch_balance()
 
-        return binance_balance, kucoin_balance, kraken_balance
-    except Exception as e:
-        logger.error(f"Erreur lors de la récupération des soldes : {e}")
-        if not reconnect('binance') or not reconnect('kucoin') or not reconnect('kraken'):
-            return None, None, None
-        send_telegram_message(f"Erreur lors de la récupération des soldes : {e}")
-        return None, None, None
+            logger.info(f"Solde Binance (XRP): {binance_balance['total'].get('XRP', 0)} XRP, {binance_balance['total'].get('USDC', 0)} USDC")
+            logger.info(f"Solde KuCoin (XRP): {kucoin_balance['total'].get('XRP', 0)} XRP, {kucoin_balance['total'].get('USDC', 0)} USDC")
+            logger.info(f"Solde Kraken (XRP): {kraken_balance['total'].get('XRP', 0)} XRP, {kraken_balance['total'].get('USDC', 0)} USDC")
+
+            return binance_balance, kucoin_balance, kraken_balance
+        except Exception as e:
+            retries += 1
+            logger.error(f"Erreur lors de la récupération des soldes (tentative {retries}) : {e}")
+            if not reconnect('binance') or not reconnect('kucoin') or not reconnect('kraken'):
+                time.sleep(delay)  # Attendre avant la prochaine tentative
+            send_telegram_message(f"Erreur lors de la récupération des soldes, tentative {retries} : {e}")
+
+    logger.error(f"Échec de récupération des soldes après {max_retries} tentatives.")
+    return None, None, None
 
 # Logger pour suivre l'activité et éviter la surcharge
 log_formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
@@ -470,14 +478,18 @@ def arbitrage():
     start_time = time.time()  # Pour la notification périodique
     while True:
         try:
-            # Récupérer les prix actuels sur Binance, KuCoin et Kraken
-            binance_price = binance.fetch_ticker('XRP/USDC')['last']
-            kucoin_price = kucoin.fetch_ticker('XRP/USDC')['last']
-            kraken_price = kraken.fetch_ticker('XRP/USDC')['last']
-            
-            price_history.append((binance_price + kucoin_price + kraken_price) / 3)  # Ajouter les prix dans l'historique
-            if len(price_history) > 20:
-                price_history.pop(0)  # Limiter l'historique à 20 points
+    binance_price = binance.fetch_ticker('XRP/USDC')['last']
+    kucoin_price = kucoin.fetch_ticker('XRP/USDC')['last']
+    kraken_price = kraken.fetch_ticker('XRP/USDC')['last']
+except Exception as e:
+    logger.error(f"Erreur lors de la récupération des prix : {e}")
+    if not reconnect('binance') or not reconnect('kucoin') or not reconnect('kraken'):
+        return  # Si la reconnexion échoue, sortir de la fonction pour éviter des prix partiels
+
+# Si tous les prix sont récupérés correctement, les ajouter à l'historique
+price_history.append((binance_price + kucoin_price + kraken_price) / 3)
+if len(price_history) > 20:
+    price_history.pop(0)  # Limiter l'historique à 20 points
 
             volatility = calculate_volatility(price_history)  # Calculer la volatilité
 
