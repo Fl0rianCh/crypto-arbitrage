@@ -78,6 +78,24 @@ ideal_allocation = {
     'kucoin': {'XRP': 14, 'USDC': 21}
 }
 
+def convert_usdc_to_usdt_kucoin(amount):
+    try:
+        order = kucoin.create_market_sell_order('USDC/USDT', amount)
+        logger.info(f"Conversion de {amount} USDC à USDT sur KuCoin")
+        return order
+    except Exception as e:
+        logger.error(f"Erreur lors de la conversion USDC -> USDT sur KuCoin : {e}")
+        return None
+
+def convert_usdt_to_usdc_kucoin(amount):
+    try:
+        order = kucoin.create_market_sell_order('USDT/USDC', amount)
+        logger.info(f"Conversion de {amount} USDT à USDC sur KuCoin")
+        return order
+    except Exception as e:
+        logger.error(f"Erreur lors de la conversion USDT -> USDC sur KuCoin : {e}")
+        return None
+
 # Fonction pour récupérer les soldes sur chaque plateforme
 def get_balances():
     retries = 0
@@ -478,10 +496,11 @@ def arbitrage():
     start_time = time.time()  # Pour la notification périodique
     while True:
         try:
-            # Récupérer les prix actuels sur Binance, KuCoin et Kraken
-            binance_price = binance.fetch_ticker('XRP/USDC')['last']
-            kucoin_price = kucoin.fetch_ticker('XRP/USDC')['last']
-            kraken_price = kraken.fetch_ticker('XRP/USDC')['last']
+# Remplacer les paires utilisées par chaque exchange
+binance_price = binance.fetch_ticker('XRP/USDC')['last']  # Binance : XRP/USDC
+kraken_price = kraken.fetch_ticker('XRP/USDT')['last']  # Kraken : XRP/USDT
+kucoin_price_usdc = kucoin.fetch_ticker('XRP/USDC')['last']  # KuCoin : XRP/USDC
+kucoin_price_usdt = kucoin.fetch_ticker('XRP/USDT')['last']  # KuCoin : XRP/USDT
 
             # Si tous les prix sont récupérés correctement, les ajouter à l'historique
             price_history.append((binance_price + kucoin_price + kraken_price) / 3)
@@ -492,6 +511,15 @@ def arbitrage():
             min_price_difference_dynamic = calculate_dynamic_price_difference(volatility, base_min_difference=0.0005)
 
             binance_balance, kucoin_balance, kraken_balance = get_balances()
+
+            # Vérifier si une conversion USDC -> USDT ou USDT -> USDC est nécessaire sur KuCoin avant l'arbitrage
+if binance_balance['total']['USDC'] < amount_to_trade_binance and kucoin_balance['total']['USDT'] >= amount_to_trade_binance:
+    logger.info("Conversion nécessaire: USDT vers USDC sur KuCoin")
+    convert_usdt_to_usdc_kucoin(amount_to_trade_binance)
+
+if kraken_balance['total']['USDT'] < amount_to_trade_kraken and kucoin_balance['total']['USDC'] >= amount_to_trade_kraken:
+    logger.info("Conversion nécessaire: USDC vers USDT sur KuCoin")
+    convert_usdc_to_usdt_kucoin(amount_to_trade_kraken)
 
             # Calculer le montant à trader en utilisant les soldes disponibles
             amount_to_trade_kucoin = calculate_trade_amount(kucoin_balance, kucoin_price, 'kucoin')
