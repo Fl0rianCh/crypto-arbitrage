@@ -22,8 +22,8 @@ def reconnect(exchange_name, max_retries=5, delay=10):
             return True
         except Exception as e:
             retries += 1
-            logger.warning(f"Échec de la connexion avec {exchange_name}. Tentative {retries}/{max_retries}. Erreur : {e}")
-            time.sleep(delay)  # Attendre avant de réessayer
+            logger.warning(f"Tentative {retries}/{max_retries}. Erreur : {e}")
+            time.sleep(delay * (2 ** retries))  # Augmenter le délai de manière exponentielle
     logger.error(f"Impossible de rétablir la connexion avec {exchange_name} après {max_retries} tentatives.")
     send_telegram_message(f"Impossible de rétablir la connexion avec {exchange_name} après {max_retries} tentatives.")
     return False
