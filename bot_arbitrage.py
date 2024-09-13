@@ -6,6 +6,28 @@ import numpy as np  # Pour calculer la volatilité
 from logging.handlers import TimedRotatingFileHandler
 from datetime import datetime
 
+# Fonction générique pour gérer les reconnections
+def reconnect(exchange_name, max_retries=5, delay=10):
+    retries = 0
+    while retries < max_retries:
+        try:
+            # Essayer une requête simple pour vérifier la connexion
+            if exchange_name == 'binance':
+                binance.fetch_time()
+            elif exchange_name == 'kucoin':
+                kucoin.fetch_time()
+            elif exchange_name == 'kraken':
+                kraken.fetch_time()
+            logger.info(f"Connexion rétablie avec {exchange_name}")
+            return True
+        except Exception as e:
+            retries += 1
+            logger.warning(f"Échec de la connexion avec {exchange_name}. Tentative {retries}/{max_retries}. Erreur : {e}")
+            time.sleep(delay)  # Attendre avant de réessayer
+    logger.error(f"Impossible de rétablir la connexion avec {exchange_name} après {max_retries} tentatives.")
+    send_telegram_message(f"Impossible de rétablir la connexion avec {exchange_name} après {max_retries} tentatives.")
+    return False
+
 # Configuration API Binance
 binance_api_key = 'job6FqJN3HZ0ekXO7uZ245FwCwbLbFIrz0Zrlq4pflUgXoCPw0ehmscdzNv0PGIA'
 binance_secret_key = 'pGUCIqZpKF25EBDZCokGFJbU6aI051wJEPjj0f3TkQWsiKiW2nEgN9nV7Op4D1Ns'
@@ -70,6 +92,8 @@ def get_balances():
         return binance_balance, kucoin_balance, kraken_balance
     except Exception as e:
         logger.error(f"Erreur lors de la récupération des soldes : {e}")
+        if not reconnect('binance') or not reconnect('kucoin') or not reconnect('kraken'):
+            return None, None, None
         send_telegram_message(f"Erreur lors de la récupération des soldes : {e}")
         return None, None, None
 
@@ -101,57 +125,170 @@ def send_telegram_message(message):
 # Acheter sur KuCoin
 def buy_on_kucoin(amount, price):
     try:
-        kucoin.create_limit_buy_order('XRP/USDC', amount, price)
+        order = kucoin.create_limit_buy_order('XRP/USDC', amount, price)
         logger.info(f"Achat de {amount} XRP à {price} USDC sur KuCoin")
+        
+        start_time = time.time()
+        while time.time() - start_time < 60:
+            try:
+                order_status = kucoin.fetch_order(order['id'])
+                if order_status['status'] == 'closed':
+                    logger.info(f"Ordre exécuté : {amount} XRP acheté à {price} USDC sur KuCoin")
+                    return
+            except Exception as e:
+                logger.error(f"Erreur lors de la récupération du statut de l'ordre sur KuCoin : {e}")
+                if not reconnect('kucoin'):
+                    return  # Si la reconnexion échoue, arrêter la fonction
+            time.sleep(5)
+
+        kucoin.cancel_order(order['id'])
+        logger.warning(f"Ordre annulé après 60 secondes sans exécution : {amount} XRP à {price} USDC sur KuCoin")
+
     except Exception as e:
         logger.error(f"Erreur lors de l'achat sur KuCoin : {e}")
+        if not reconnect('kucoin'):
+            return  # Si la reconnexion échoue, arrêter la fonction
         send_telegram_message(f"Erreur lors de l'achat sur KuCoin : {e}")
 
 # Vendre sur KuCoin
 def sell_on_kucoin(amount, price):
     try:
-        kucoin.create_limit_sell_order('XRP/USDC', amount, price)
+        order = kucoin.create_limit_sell_order('XRP/USDC', amount, price)
         logger.info(f"Vente de {amount} XRP à {price} USDC sur KuCoin")
+        
+        start_time = time.time()
+        while time.time() - start_time < 60:
+            try:
+                order_status = kucoin.fetch_order(order['id'])
+                if order_status['status'] == 'closed':
+                    logger.info(f"Ordre exécuté : {amount} XRP vendu à {price} USDC sur KuCoin")
+                    return
+            except Exception as e:
+                logger.error(f"Erreur lors de la récupération du statut de l'ordre sur KuCoin : {e}")
+                if not reconnect('kucoin'):
+                    return  # Si la reconnexion échoue, arrêter la fonction
+            time.sleep(5)
+
+        kucoin.cancel_order(order['id'])
+        logger.warning(f"Ordre annulé après 60 secondes sans exécution : {amount} XRP à {price} USDC sur KuCoin")
+
     except Exception as e:
         logger.error(f"Erreur lors de la vente sur KuCoin : {e}")
+        if not reconnect('kucoin'):
+            return  # Si la reconnexion échoue, arrêter la fonction
         send_telegram_message(f"Erreur lors de la vente sur KuCoin : {e}")
 
 # Acheter sur Binance
 def buy_on_binance(amount, price):
     try:
-        binance.create_limit_buy_order('XRP/USDC', amount, price)
+        order = binance.create_limit_buy_order('XRP/USDC', amount, price)
         logger.info(f"Achat de {amount} XRP à {price} USDC sur Binance")
+        
+        start_time = time.time()
+        while time.time() - start_time < 60:
+            try:
+                order_status = binance.fetch_order(order['id'])
+                if order_status['status'] == 'closed':
+                    logger.info(f"Ordre exécuté : {amount} XRP acheté à {price} USDC sur Binance")
+                    return
+            except Exception as e:
+                logger.error(f"Erreur lors de la récupération du statut de l'ordre sur Binance : {e}")
+                if not reconnect('binance'):
+                    return  # Si la reconnexion échoue, arrêter la fonction
+            time.sleep(5)
+
+        binance.cancel_order(order['id'])
+        logger.warning(f"Ordre annulé après 60 secondes sans exécution : {amount} XRP à {price} USDC sur Binance")
+
     except Exception as e:
         logger.error(f"Erreur lors de l'achat sur Binance : {e}")
+        if not reconnect('binance'):
+            return  # Si la reconnexion échoue, arrêter la fonction
         send_telegram_message(f"Erreur lors de l'achat sur Binance : {e}")
 
 # Vendre sur Binance
 def sell_on_binance(amount, price):
     try:
-        binance.create_limit_sell_order('XRP/USDC', amount, price)
+        order = binance.create_limit_sell_order('XRP/USDC', amount, price)
         logger.info(f"Vente de {amount} XRP à {price} USDC sur Binance")
+        
+        start_time = time.time()
+        while time.time() - start_time < 60:
+            try:
+                order_status = binance.fetch_order(order['id'])
+                if order_status['status'] == 'closed':
+                    logger.info(f"Ordre exécuté : {amount} XRP vendu à {price} USDC sur Binance")
+                    return
+            except Exception as e:
+                logger.error(f"Erreur lors de la récupération du statut de l'ordre sur Binance : {e}")
+                if not reconnect('binance'):
+                    return  # Si la reconnexion échoue, arrêter la fonction
+            time.sleep(5)
+
+        binance.cancel_order(order['id'])
+        logger.warning(f"Ordre annulé après 60 secondes sans exécution : {amount} XRP à {price} USDC sur Binance")
+
     except Exception as e:
         logger.error(f"Erreur lors de la vente sur Binance : {e}")
+        if not reconnect('binance'):
+            return  # Si la reconnexion échoue, arrêter la fonction
         send_telegram_message(f"Erreur lors de la vente sur Binance : {e}")
-
+        
 # Acheter sur Kraken
 def buy_on_kraken(amount, price):
     try:
-        kraken.create_limit_buy_order('XRP/USDC', amount, price)
+        order = kraken.create_limit_buy_order('XRP/USDC', amount, price)
         logger.info(f"Achat de {amount} XRP à {price} USDC sur Kraken")
+        
+        start_time = time.time()
+        while time.time() - start_time < 60:
+            try:
+                order_status = kraken.fetch_order(order['id'])
+                if order_status['status'] == 'closed':
+                    logger.info(f"Ordre exécuté : {amount} XRP acheté à {price} USDC sur Kraken")
+                    return
+            except Exception as e:
+                logger.error(f"Erreur lors de la récupération du statut de l'ordre sur Kraken : {e}")
+                if not reconnect('kraken'):
+                    return  # Si la reconnexion échoue, arrêter la fonction
+            time.sleep(5)
+
+        kraken.cancel_order(order['id'])
+        logger.warning(f"Ordre annulé après 60 secondes sans exécution : {amount} XRP à {price} USDC sur Kraken")
+
     except Exception as e:
         logger.error(f"Erreur lors de l'achat sur Kraken : {e}")
+        if not reconnect('kraken'):
+            return  # Si la reconnexion échoue, arrêter la fonction
         send_telegram_message(f"Erreur lors de l'achat sur Kraken : {e}")
 
 # Vendre sur Kraken
 def sell_on_kraken(amount, price):
     try:
-        kraken.create_limit_sell_order('XRP/USDC', amount, price)
+        order = kraken.create_limit_sell_order('XRP/USDC', amount, price)
         logger.info(f"Vente de {amount} XRP à {price} USDC sur Kraken")
+        
+        start_time = time.time()
+        while time.time() - start_time < 60:
+            try:
+                order_status = kraken.fetch_order(order['id'])
+                if order_status['status'] == 'closed':
+                    logger.info(f"Ordre exécuté : {amount} XRP vendu à {price} USDC sur Kraken")
+                    return
+            except Exception as e:
+                logger.error(f"Erreur lors de la récupération du statut de l'ordre sur Kraken : {e}")
+                if not reconnect('kraken'):
+                    return  # Si la reconnexion échoue, arrêter la fonction
+            time.sleep(5)
+
+        kraken.cancel_order(order['id'])
+        logger.warning(f"Ordre annulé après 60 secondes sans exécution : {amount} XRP à {price} USDC sur Kraken")
+
     except Exception as e:
         logger.error(f"Erreur lors de la vente sur Kraken : {e}")
+        if not reconnect('kraken'):
+            return  # Si la reconnexion échoue, arrêter la fonction
         send_telegram_message(f"Erreur lors de la vente sur Kraken : {e}")
-
 
 # Fonction pour calculer les frais de transaction sur chaque plateforme
 def calculate_fees(amount_traded, price, platform):
