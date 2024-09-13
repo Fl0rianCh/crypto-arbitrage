@@ -334,21 +334,20 @@ def calculate_profit(buy_price, sell_price, amount, buy_platform, sell_platform)
     profit = (sell_price - buy_price) * amount - (fees_buy + fees_sell)
     return profit, fees_buy, fees_sell
 
-# Fonction pour annuler tous les ordres ouverts sur une plateforme donnée
-def cancel_open_orders(exchange, platform_name):
+def cancel_open_orders(exchange, platform_name, symbol='XRP/USDC'):
     try:
-        open_orders = exchange.fetch_open_orders('XRP/USDC')
+        open_orders = exchange.fetch_open_orders(symbol)
         if len(open_orders) > 0:
-            logger.info(f"{len(open_orders)} ordres ouverts trouvés sur {platform_name}, annulation en cours.")
+            logger.info(f"{len(open_orders)} ordres ouverts trouvés sur {platform_name} pour {symbol}, annulation en cours.")
             for order in open_orders:
                 exchange.cancel_order(order['id'])
-                logger.info(f"Ordre {order['id']} annulé sur {platform_name}.")
-            send_telegram_message(f"{len(open_orders)} ordres ouverts annulés sur {platform_name}.")
+                logger.info(f"Ordre {order['id']} annulé sur {platform_name} pour {symbol}.")
+            send_telegram_message(f"{len(open_orders)} ordres ouverts annulés sur {platform_name} pour {symbol}.")
         else:
-            logger.info(f"Aucun ordre ouvert sur {platform_name}.")
+            logger.info(f"Aucun ordre ouvert sur {platform_name} pour {symbol}.")
     except Exception as e:
-        logger.error(f"Erreur lors de l'annulation des ordres sur {platform_name} : {e}")
-        send_telegram_message(f"Erreur lors de l'annulation des ordres sur {platform_name} : {e}")
+        logger.error(f"Erreur lors de l'annulation des ordres sur {platform_name} pour {symbol} : {e}")
+        send_telegram_message(f"Erreur lors de l'annulation des ordres sur {platform_name} pour {symbol} : {e}")
 
 # Fonction pour vérifier et annuler les ordres ouverts avant chaque transfert
 def check_and_cancel_open_orders():
