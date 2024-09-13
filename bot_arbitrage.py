@@ -263,7 +263,7 @@ def sell_on_binance(amount, price):
 # Acheter sur Kraken
 def buy_on_kraken(amount, price):
     try:
-        order = kraken.create_limit_buy_order('XRP/USDC', amount, price)
+        order = kraken.create_limit_buy_order('XRP/USDT', amount, price)
         logger.info(f"Achat de {amount} XRP à {price} USDC sur Kraken")
         
         start_time = time.time()
@@ -291,7 +291,7 @@ def buy_on_kraken(amount, price):
 # Vendre sur Kraken
 def sell_on_kraken(amount, price):
     try:
-        order = kraken.create_limit_sell_order('XRP/USDC', amount, price)
+        order = kraken.create_limit_sell_order('XRP/USDT', amount, price)
         logger.info(f"Vente de {amount} XRP à {price} USDC sur Kraken")
         
         start_time = time.time()
@@ -326,6 +326,13 @@ def calculate_fees(amount_traded, price, platform):
     elif platform == 'kraken':
         return total_amount * trading_fee_kraken
     return 0
+
+# Fonction pour calculer les profits
+def calculate_profit(buy_price, sell_price, amount, buy_platform, sell_platform):
+    fees_buy = calculate_fees(amount, buy_price, buy_platform)
+    fees_sell = calculate_fees(amount, sell_price, sell_platform)
+    profit = (sell_price - buy_price) * amount - (fees_buy + fees_sell)
+    return profit, fees_buy, fees_sell
 
 # Fonction pour annuler tous les ordres ouverts sur une plateforme donnée
 def cancel_open_orders(exchange, platform_name):
@@ -496,11 +503,11 @@ def arbitrage():
     start_time = time.time()  # Pour la notification périodique
     while True:
         try:
-# Remplacer les paires utilisées par chaque exchange
-binance_price = binance.fetch_ticker('XRP/USDC')['last']  # Binance : XRP/USDC
-kraken_price = kraken.fetch_ticker('XRP/USDT')['last']  # Kraken : XRP/USDT
-kucoin_price_usdc = kucoin.fetch_ticker('XRP/USDC')['last']  # KuCoin : XRP/USDC
-kucoin_price_usdt = kucoin.fetch_ticker('XRP/USDT')['last']  # KuCoin : XRP/USDT
+            # Remplacer les paires utilisées par chaque exchange
+            binance_price = binance.fetch_ticker('XRP/USDC')['last']  # Binance : XRP/USDC
+            kraken_price = kraken.fetch_ticker('XRP/USDT')['last']  # Kraken : XRP/USDT
+            kucoin_price_usdc = kucoin.fetch_ticker('XRP/USDC')['last']  # KuCoin : XRP/USDC
+            kucoin_price_usdt = kucoin.fetch_ticker('XRP/USDT')['last']  # KuCoin : XRP/USDT
 
             # Si tous les prix sont récupérés correctement, les ajouter à l'historique
             price_history.append((binance_price + kucoin_price + kraken_price) / 3)
@@ -512,19 +519,19 @@ kucoin_price_usdt = kucoin.fetch_ticker('XRP/USDT')['last']  # KuCoin : XRP/USDT
 
             binance_balance, kucoin_balance, kraken_balance = get_balances()
 
-            # Vérifier si une conversion USDC -> USDT ou USDT -> USDC est nécessaire sur KuCoin avant l'arbitrage
-if binance_balance['total']['USDC'] < amount_to_trade_binance and kucoin_balance['total']['USDT'] >= amount_to_trade_binance:
-    logger.info("Conversion nécessaire: USDT vers USDC sur KuCoin")
-    convert_usdt_to_usdc_kucoin(amount_to_trade_binance)
-
-if kraken_balance['total']['USDT'] < amount_to_trade_kraken and kucoin_balance['total']['USDC'] >= amount_to_trade_kraken:
-    logger.info("Conversion nécessaire: USDC vers USDT sur KuCoin")
-    convert_usdc_to_usdt_kucoin(amount_to_trade_kraken)
-
             # Calculer le montant à trader en utilisant les soldes disponibles
             amount_to_trade_kucoin = calculate_trade_amount(kucoin_balance, kucoin_price, 'kucoin')
             amount_to_trade_binance = calculate_trade_amount(binance_balance, binance_price, 'binance')
             amount_to_trade_kraken = calculate_trade_amount(kraken_balance, kraken_price, 'kraken')
+
+            # Vérifier si une conversion USDC -> USDT ou USDT -> USDC est nécessaire sur KuCoin avant l'arbitrage
+            if binance_balance['total']['USDC'] < amount_to_trade_binance and kucoin_balance['total']['USDT'] >= amount_to_trade_binance:
+                logger.info("Conversion nécessaire: USDT vers USDC sur KuCoin")
+                convert_usdt_to_usdc_kucoin(amount_to_trade_binance)
+
+            if kraken_balance['total']['USDT'] < amount_to_trade_kraken and kucoin_balance['total']['USDC'] >= amount_to_trade_kraken:
+                logger.info("Conversion nécessaire: USDC vers USDT sur KuCoin")
+                convert_usdc_to_usdt_kucoin(amount_to_trade_kraken)
 
             # Vérification des montants minimums et arbitrage KuCoin -> Binance
             if amount_to_trade_kucoin > 0 and is_arbitrage_opportunity(kucoin_price, binance_price, 'kucoin', 'binance', min_price_difference_dynamic):
