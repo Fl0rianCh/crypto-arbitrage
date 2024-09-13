@@ -43,7 +43,7 @@ kraken = ccxt.kraken({
 })
 
 # Configuration du bot
-min_price_difference = 0.0005  # Seuil minimum de différence de prix en USDT ajusté
+min_price_difference = 0.0005  # Seuil minimum de différence de prix en USDC ajusté
 trading_fee_binance = 0.00075  # 0,075% de frais sur Binance
 trading_fee_kucoin = 0.001  # 0,1% de frais sur KuCoin
 trading_fee_kraken = 0.0016  # 0,16% de frais sur Kraken
@@ -51,9 +51,9 @@ stop_loss_percentage = 0.005  # Stop-loss à 0,5% sous le prix d'achat
 
 # Répartition idéale en pourcentage
 ideal_allocation = {
-    'binance': {'XRP': 24.5, 'USDT': 10.5},
-    'kraken': {'XRP': 24, 'USDT': 6},
-    'kucoin': {'XRP': 14, 'USDT': 21}
+    'binance': {'XRP': 24.5, 'USDC': 10.5},
+    'kraken': {'XRP': 24, 'USDC': 6},
+    'kucoin': {'XRP': 14, 'USDC': 21}
 }
 
 # Fonction pour récupérer les soldes sur chaque plateforme
@@ -63,9 +63,9 @@ def get_balances():
         kucoin_balance = kucoin.fetch_balance()
         kraken_balance = kraken.fetch_balance()
 
-        logger.info(f"Solde Binance (XRP): {binance_balance['total'].get('XRP', 0)} XRP, {binance_balance['total'].get('USDT', 0)} USDT")
-        logger.info(f"Solde KuCoin (XRP): {kucoin_balance['total'].get('XRP', 0)} XRP, {kucoin_balance['total'].get('USDT', 0)} USDT")
-        logger.info(f"Solde Kraken (XRP): {kraken_balance['total'].get('XRP', 0)} XRP, {kraken_balance['total'].get('USDT', 0)} USDT")
+        logger.info(f"Solde Binance (XRP): {binance_balance['total'].get('XRP', 0)} XRP, {binance_balance['total'].get('USDC', 0)} USDC")
+        logger.info(f"Solde KuCoin (XRP): {kucoin_balance['total'].get('XRP', 0)} XRP, {kucoin_balance['total'].get('USDC', 0)} USDC")
+        logger.info(f"Solde Kraken (XRP): {kraken_balance['total'].get('XRP', 0)} XRP, {kraken_balance['total'].get('USDC', 0)} USDC")
 
         return binance_balance, kucoin_balance, kraken_balance
     except Exception as e:
@@ -109,6 +109,40 @@ def calculate_fees(amount_traded, price, platform):
         return total_amount * trading_fee_kraken
     return 0
 
+# Fonction pour annuler tous les ordres ouverts sur une plateforme donnée
+def cancel_open_orders(exchange, platform_name):
+    try:
+        open_orders = exchange.fetch_open_orders()
+        if len(open_orders) > 0:
+            logger.info(f"{len(open_orders)} ordres ouverts trouvés sur {platform_name}, annulation en cours.")
+            for order in open_orders:
+                exchange.cancel_order(order['id'])
+                logger.info(f"Ordre {order['id']} annulé sur {platform_name}.")
+            send_telegram_message(f"{len(open_orders)} ordres ouverts annulés sur {platform_name}.")
+        else:
+            logger.info(f"Aucun ordre ouvert sur {platform_name}.")
+    except Exception as e:
+        logger.error(f"Erreur lors de l'annulation des ordres sur {platform_name} : {e}")
+        send_telegram_message(f"Erreur lors de l'annulation des ordres sur {platform_name} : {e}")
+
+# Fonction pour vérifier et annuler les ordres ouverts avant chaque transfert
+def check_and_cancel_open_orders():
+    try:
+        # Annuler les ordres ouverts sur Binance
+        cancel_open_orders(binance, 'Binance')
+
+        # Annuler les ordres ouverts sur KuCoin
+        cancel_open_orders(kucoin, 'KuCoin')
+
+        # Annuler les ordres ouverts sur Kraken
+        cancel_open_orders(kraken, 'Kraken')
+
+        logger.info("Tous les ordres ouverts ont été annulés avec succès.")
+        send_telegram_message("Tous les ordres ouverts ont été annulés avec succès.")
+    except Exception as e:
+        logger.error(f"Erreur lors de la vérification et de l'annulation des ordres : {e}")
+        send_telegram_message(f"Erreur lors de la vérification et de l'annulation des ordres : {e}")
+
 # Fonction pour vérifier si une opportunité d'arbitrage est disponible
 def is_arbitrage_opportunity(buy_price, sell_price, buy_platform, sell_platform, min_price_difference):
     # Calcul des prix avec les frais inclus
@@ -121,14 +155,14 @@ def is_arbitrage_opportunity(buy_price, sell_price, buy_platform, sell_platform,
     # Vérifier si la différence entre le prix de vente et le prix d'achat dépasse le seuil minimal
     return (sell_price_with_fees - buy_price_with_fees) > min_price_difference
 
-# Fonction pour récupérer la valeur totale du portefeuille (XRP et USDT)
+# Fonction pour récupérer la valeur totale du portefeuille (XRP et USDC)
 def get_total_portfolio_value(binance_balance, kucoin_balance, kraken_balance, binance_price, kucoin_price, kraken_price):
     total_xrp = binance_balance['total'].get('XRP', 0) + kucoin_balance['total'].get('XRP', 0) + kraken_balance['total'].get('XRP', 0)
-    total_usdt = binance_balance['total'].get('USDT', 0) + kucoin_balance['total'].get('USDT', 0) + kraken_balance['total'].get('USDT', 0)
+    total_USDC = binance_balance['total'].get('USDC', 0) + kucoin_balance['total'].get('USDC', 0) + kraken_balance['total'].get('USDC', 0)
 
-    # Convertir tous les XRP en USDT pour obtenir la valeur totale du portefeuille en USDT
-    total_xrp_value_in_usdt = total_xrp * (binance_price + kucoin_price + kraken_price) / 3
-    total_portfolio_value = total_xrp_value_in_usdt + total_usdt
+    # Convertir tous les XRP en USDC pour obtenir la valeur totale du portefeuille en USDC
+    total_xrp_value_in_USDC = total_xrp * (binance_price + kucoin_price + kraken_price) / 3
+    total_portfolio_value = total_xrp_value_in_USDC + total_USDC
     
     return total_portfolio_value
 
@@ -136,48 +170,51 @@ def get_total_portfolio_value(binance_balance, kucoin_balance, kraken_balance, b
 def rebalance_portfolios(binance_balance, kucoin_balance, kraken_balance, binance_price, kucoin_price, kraken_price):
     total_value = get_total_portfolio_value(binance_balance, kucoin_balance, kraken_balance, binance_price, kucoin_price, kraken_price)
 
-    # Calculer la valeur idéale en XRP et USDT pour chaque plateforme
+    # Calculer la valeur idéale en XRP et USDC pour chaque plateforme
     ideal_binance_xrp = (ideal_allocation['binance']['XRP'] / 100) * total_value / binance_price
-    ideal_binance_usdt = (ideal_allocation['binance']['USDT'] / 100) * total_value
+    ideal_binance_USDC = (ideal_allocation['binance']['USDC'] / 100) * total_value
     
     ideal_kraken_xrp = (ideal_allocation['kraken']['XRP'] / 100) * total_value / kraken_price
-    ideal_kraken_usdt = (ideal_allocation['kraken']['USDT'] / 100) * total_value
+    ideal_kraken_USDC = (ideal_allocation['kraken']['USDC'] / 100) * total_value
     
     ideal_kucoin_xrp = (ideal_allocation['kucoin']['XRP'] / 100) * total_value / kucoin_price
-    ideal_kucoin_usdt = (ideal_allocation['kucoin']['USDT'] / 100) * total_value
+    ideal_kucoin_USDC = (ideal_allocation['kucoin']['USDC'] / 100) * total_value
     
     # Calculer les différences entre le solde actuel et l'idéal pour chaque plateforme
     delta_binance_xrp = ideal_binance_xrp - binance_balance['total'].get('XRP', 0)
-    delta_binance_usdt = ideal_binance_usdt - binance_balance['total'].get('USDT', 0)
+    delta_binance_USDC = ideal_binance_USDC - binance_balance['total'].get('USDC', 0)
     
     delta_kraken_xrp = ideal_kraken_xrp - kraken_balance['total'].get('XRP', 0)
-    delta_kraken_usdt = ideal_kraken_usdt - kraken_balance['total'].get('USDT', 0)
+    delta_kraken_USDC = ideal_kraken_USDC - kraken_balance['total'].get('USDC', 0)
     
     delta_kucoin_xrp = ideal_kucoin_xrp - kucoin_balance['total'].get('XRP', 0)
-    delta_kucoin_usdt = ideal_kucoin_usdt - kucoin_balance['total'].get('USDT', 0)
+    delta_kucoin_USDC = ideal_kucoin_USDC - kucoin_balance['total'].get('USDC', 0)
     
     # Transferts pour rééquilibrer
     if delta_binance_xrp > 0:
         transfer_xrp('kucoin', 'binance', delta_binance_xrp)
-    if delta_binance_usdt > 0:
-        transfer_usdt('kucoin', 'binance', delta_binance_usdt)
+    if delta_binance_USDC > 0:
+        transfer_USDC('kucoin', 'binance', delta_binance_USDC)
     
     if delta_kraken_xrp > 0:
         transfer_xrp('kucoin', 'kraken', delta_kraken_xrp)
-    if delta_kraken_usdt > 0:
-        transfer_usdt('kucoin', 'kraken', delta_kraken_usdt)
+    if delta_kraken_USDC > 0:
+        transfer_USDC('kucoin', 'kraken', delta_kraken_USDC)
     
     if delta_kucoin_xrp > 0:
         transfer_xrp('binance', 'kucoin', delta_kucoin_xrp)
-    if delta_kucoin_usdt > 0:
-        transfer_usdt('binance', 'kucoin', delta_kucoin_usdt)
+    if delta_kucoin_USDC > 0:
+        transfer_USDC('binance', 'kucoin', delta_kucoin_USDC)
     
     logger.info("Rééquilibrage effectué.")
     send_telegram_message("Rééquilibrage des portefeuilles effectué.")
 
-# Fonction pour transférer des XRP entre plateformes
 def transfer_xrp(from_platform, to_platform, amount):
     try:
+        # Vérifier et annuler les ordres ouverts avant le transfert
+        check_and_cancel_open_orders()
+
+        # Ensuite, procéder au transfert
         if from_platform == 'binance' and to_platform == 'kucoin':
             binance.withdraw('XRP', amount, kucoin.fetch_deposit_address('XRP')['address'])
         elif from_platform == 'kucoin' and to_platform == 'binance':
@@ -192,22 +229,25 @@ def transfer_xrp(from_platform, to_platform, amount):
         logger.error(f"Erreur lors du transfert de XRP : {e}")
         send_telegram_message(f"Erreur lors du transfert de XRP de {from_platform} à {to_platform} : {e}")
 
-# Fonction pour transférer des USDT entre plateformes
-def transfer_usdt(from_platform, to_platform, amount):
+def transfer_USDC(from_platform, to_platform, amount):
     try:
+        # Vérifier et annuler les ordres ouverts avant le transfert
+        check_and_cancel_open_orders()
+
+        # Ensuite, procéder au transfert
         if from_platform == 'binance' and to_platform == 'kucoin':
-            binance.withdraw('USDT', amount, kucoin.fetch_deposit_address('USDT')['address'])
+            binance.withdraw('USDC', amount, kucoin.fetch_deposit_address('USDC')['address'])
         elif from_platform == 'kucoin' and to_platform == 'binance':
-            kucoin.withdraw('USDT', amount, binance.fetch_deposit_address('USDT')['address'])
+            kucoin.withdraw('USDC', amount, binance.fetch_deposit_address('USDC')['address'])
         elif from_platform == 'kucoin' and to_platform == 'kraken':
-            kucoin.withdraw('USDT', amount, kraken.fetch_deposit_address('USDT')['address'])
+            kucoin.withdraw('USDC', amount, kraken.fetch_deposit_address('USDC')['address'])
         elif from_platform == 'kraken' and to_platform == 'kucoin':
-            kraken.withdraw('USDT', amount, kucoin.fetch_deposit_address('USDT')['address'])
-        logger.info(f"Transfert de {amount} USDT de {from_platform} à {to_platform} effectué.")
-        send_telegram_message(f"Transfert de {amount} USDT de {from_platform} à {to_platform} effectué.")
+            kraken.withdraw('USDC', amount, kucoin.fetch_deposit_address('USDC')['address'])
+        logger.info(f"Transfert de {amount} USDC de {from_platform} à {to_platform} effectué.")
+        send_telegram_message(f"Transfert de {amount} USDC de {from_platform} à {to_platform} effectué.")
     except Exception as e:
-        logger.error(f"Erreur lors du transfert de USDT : {e}")
-        send_telegram_message(f"Erreur lors du transfert de USDT de {from_platform} à {to_platform} : {e}")
+        logger.error(f"Erreur lors du transfert de USDC : {e}")
+        send_telegram_message(f"Erreur lors du transfert de USDC de {from_platform} à {to_platform} : {e}")
 
 # Fonction pour calculer la volatilité sur l'historique des prix
 def calculate_volatility(prices):
@@ -219,7 +259,7 @@ def calculate_dynamic_price_difference(volatility, base_min_difference=0.0005):
 
 # Fonction pour calculer le montant à investir en fonction des soldes disponibles
 def calculate_trade_amount(balance, price, platform):
-    available_balance = balance['total'].get('USDT' if platform == 'kucoin' else 'XRP', 0)
+    available_balance = balance['total'].get('USDC' if platform == 'kucoin' else 'XRP', 0)
     
     # Allouer un pourcentage du solde disponible pour l'achat
     capital_allocation_percentage = 0.5  # Utiliser 50% du capital disponible
@@ -239,9 +279,9 @@ def arbitrage():
     while True:
         try:
             # Récupérer les prix actuels sur Binance, KuCoin et Kraken
-            binance_price = binance.fetch_ticker('XRP/USDT')['last']
-            kucoin_price = kucoin.fetch_ticker('XRP/USDT')['last']
-            kraken_price = kraken.fetch_ticker('XRP/USDT')['last']
+            binance_price = binance.fetch_ticker('XRP/USDC')['last']
+            kucoin_price = kucoin.fetch_ticker('XRP/USDC')['last']
+            kraken_price = kraken.fetch_ticker('XRP/USDC')['last']
             
             price_history.append((binance_price + kucoin_price + kraken_price) / 3)  # Ajouter les prix dans l'historique
             if len(price_history) > 20:
@@ -266,8 +306,8 @@ def arbitrage():
 
                 # Calcul des profits
                 profit, fees_buy, fees_sell = calculate_profit(kucoin_price, binance_price, amount_to_trade_kucoin, 'kucoin', 'binance')
-                logger.info(f"Profit net : {profit} USDT, Frais d'achat : {fees_buy}, Frais de vente : {fees_sell}")
-                send_telegram_message(f"Arbitrage KuCoin -> Binance: Profit de {profit:.2f} USDT")
+                logger.info(f"Profit net : {profit} USDC, Frais d'achat : {fees_buy}, Frais de vente : {fees_sell}")
+                send_telegram_message(f"Arbitrage KuCoin -> Binance: Profit de {profit:.2f} USDC")
 
                 # Rééquilibrer après chaque arbitrage
                 rebalance_portfolios(binance_balance, kucoin_balance, kraken_balance, binance_price, kucoin_price, kraken_price)
@@ -280,8 +320,8 @@ def arbitrage():
 
                 # Calcul des profits
                 profit, fees_buy, fees_sell = calculate_profit(kraken_price, binance_price, amount_to_trade_kraken, 'kraken', 'binance')
-                logger.info(f"Profit net : {profit} USDT, Frais d'achat : {fees_buy}, Frais de vente : {fees_sell}")
-                send_telegram_message(f"Arbitrage Kraken -> Binance: Profit de {profit:.2f} USDT")
+                logger.info(f"Profit net : {profit} USDC, Frais d'achat : {fees_buy}, Frais de vente : {fees_sell}")
+                send_telegram_message(f"Arbitrage Kraken -> Binance: Profit de {profit:.2f} USDC")
 
                 # Rééquilibrer après chaque arbitrage
                 rebalance_portfolios(binance_balance, kucoin_balance, kraken_balance, binance_price, kucoin_price, kraken_price)
@@ -294,8 +334,8 @@ def arbitrage():
 
                 # Calcul des profits
                 profit, fees_buy, fees_sell = calculate_profit(kucoin_price, kraken_price, amount_to_trade_kucoin, 'kucoin', 'kraken')
-                logger.info(f"Profit net : {profit} USDT, Frais d'achat : {fees_buy}, Frais de vente : {fees_sell}")
-                send_telegram_message(f"Arbitrage KuCoin -> Kraken: Profit de {profit:.2f} USDT")
+                logger.info(f"Profit net : {profit} USDC, Frais d'achat : {fees_buy}, Frais de vente : {fees_sell}")
+                send_telegram_message(f"Arbitrage KuCoin -> Kraken: Profit de {profit:.2f} USDC")
 
                 # Rééquilibrer après chaque arbitrage
                 rebalance_portfolios(binance_balance, kucoin_balance, kraken_balance, binance_price, kucoin_price, kraken_price)
