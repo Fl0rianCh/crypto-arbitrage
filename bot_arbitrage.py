@@ -478,21 +478,17 @@ def arbitrage():
     start_time = time.time()  # Pour la notification périodique
     while True:
         try:
-    binance_price = binance.fetch_ticker('XRP/USDC')['last']
-    kucoin_price = kucoin.fetch_ticker('XRP/USDC')['last']
-    kraken_price = kraken.fetch_ticker('XRP/USDC')['last']
-except Exception as e:
-    logger.error(f"Erreur lors de la récupération des prix : {e}")
-    if not reconnect('binance') or not reconnect('kucoin') or not reconnect('kraken'):
-        return  # Si la reconnexion échoue, sortir de la fonction pour éviter des prix partiels
+            # Récupérer les prix actuels sur Binance, KuCoin et Kraken
+            binance_price = binance.fetch_ticker('XRP/USDC')['last']
+            kucoin_price = kucoin.fetch_ticker('XRP/USDC')['last']
+            kraken_price = kraken.fetch_ticker('XRP/USDC')['last']
 
-# Si tous les prix sont récupérés correctement, les ajouter à l'historique
-price_history.append((binance_price + kucoin_price + kraken_price) / 3)
-if len(price_history) > 20:
-    price_history.pop(0)  # Limiter l'historique à 20 points
+            # Si tous les prix sont récupérés correctement, les ajouter à l'historique
+            price_history.append((binance_price + kucoin_price + kraken_price) / 3)
+            if len(price_history) > 20:
+                price_history.pop(0)  # Limiter l'historique à 20 points
 
             volatility = calculate_volatility(price_history)  # Calculer la volatilité
-
             min_price_difference_dynamic = calculate_dynamic_price_difference(volatility, base_min_difference=0.0005)
 
             binance_balance, kucoin_balance, kraken_balance = get_balances()
