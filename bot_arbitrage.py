@@ -337,7 +337,7 @@ def calculate_profit(buy_price, sell_price, amount, buy_platform, sell_platform)
 # Fonction pour annuler tous les ordres ouverts sur une plateforme donnée
 def cancel_open_orders(exchange, platform_name):
     try:
-        open_orders = exchange.fetch_open_orders()
+        open_orders = exchange.fetch_open_orders('XRP/USDC')
         if len(open_orders) > 0:
             logger.info(f"{len(open_orders)} ordres ouverts trouvés sur {platform_name}, annulation en cours.")
             for order in open_orders:
