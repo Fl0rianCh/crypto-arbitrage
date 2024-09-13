@@ -98,6 +98,61 @@ def send_telegram_message(message):
     except Exception as e:
         logger.error(f"Exception lors de l'envoi de la notification Telegram : {e}")
 
+# Acheter sur KuCoin
+def buy_on_kucoin(amount, price):
+    try:
+        kucoin.create_limit_buy_order('XRP/USDC', amount, price)
+        logger.info(f"Achat de {amount} XRP à {price} USDC sur KuCoin")
+    except Exception as e:
+        logger.error(f"Erreur lors de l'achat sur KuCoin : {e}")
+        send_telegram_message(f"Erreur lors de l'achat sur KuCoin : {e}")
+
+# Vendre sur KuCoin
+def sell_on_kucoin(amount, price):
+    try:
+        kucoin.create_limit_sell_order('XRP/USDC', amount, price)
+        logger.info(f"Vente de {amount} XRP à {price} USDC sur KuCoin")
+    except Exception as e:
+        logger.error(f"Erreur lors de la vente sur KuCoin : {e}")
+        send_telegram_message(f"Erreur lors de la vente sur KuCoin : {e}")
+
+# Acheter sur Binance
+def buy_on_binance(amount, price):
+    try:
+        binance.create_limit_buy_order('XRP/USDC', amount, price)
+        logger.info(f"Achat de {amount} XRP à {price} USDC sur Binance")
+    except Exception as e:
+        logger.error(f"Erreur lors de l'achat sur Binance : {e}")
+        send_telegram_message(f"Erreur lors de l'achat sur Binance : {e}")
+
+# Vendre sur Binance
+def sell_on_binance(amount, price):
+    try:
+        binance.create_limit_sell_order('XRP/USDC', amount, price)
+        logger.info(f"Vente de {amount} XRP à {price} USDC sur Binance")
+    except Exception as e:
+        logger.error(f"Erreur lors de la vente sur Binance : {e}")
+        send_telegram_message(f"Erreur lors de la vente sur Binance : {e}")
+
+# Acheter sur Kraken
+def buy_on_kraken(amount, price):
+    try:
+        kraken.create_limit_buy_order('XRP/USDC', amount, price)
+        logger.info(f"Achat de {amount} XRP à {price} USDC sur Kraken")
+    except Exception as e:
+        logger.error(f"Erreur lors de l'achat sur Kraken : {e}")
+        send_telegram_message(f"Erreur lors de l'achat sur Kraken : {e}")
+
+# Vendre sur Kraken
+def sell_on_kraken(amount, price):
+    try:
+        kraken.create_limit_sell_order('XRP/USDC', amount, price)
+        logger.info(f"Vente de {amount} XRP à {price} USDC sur Kraken")
+    except Exception as e:
+        logger.error(f"Erreur lors de la vente sur Kraken : {e}")
+        send_telegram_message(f"Erreur lors de la vente sur Kraken : {e}")
+
+
 # Fonction pour calculer les frais de transaction sur chaque plateforme
 def calculate_fees(amount_traded, price, platform):
     total_amount = amount_traded * price
