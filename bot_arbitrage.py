@@ -109,7 +109,7 @@ def get_balances():
             kraken_balance = kraken.fetch_balance()
 
             logger.info(f"Solde Binance (XRP): {binance_balance['total'].get('XRP', 0)} XRP, {binance_balance['total'].get('USDC', 0)} USDC")
-            logger.info(f"Solde KuCoin (XRP): {kucoin_balance['total'].get('XRP', 0)} XRP, {kucoin_balance['total'].get('USDC', 0)} USDC")
+            logger.info(f"Solde KuCoin (XRP): {kucoin_balance['total'].get('XRP', 0)} XRP, {kucoin_balance['total'].get('USDC', 0)} USDC, {kucoin_balance['total'].get('USDT', 0)} USDT")
             logger.info(f"Solde Kraken (XRP): {kraken_balance['total'].get('XRP', 0)} XRP, {kraken_balance['total'].get('USDC', 0)} USDC")
 
             return binance_balance, kucoin_balance, kraken_balance
@@ -485,11 +485,16 @@ def calculate_dynamic_price_difference(volatility, base_min_difference=0.0005):
 # Fonction pour calculer le montant à investir en fonction des soldes disponibles
 def calculate_trade_amount(balance, price, platform):
     available_balance = balance['total'].get('USDC' if platform == 'kucoin' else 'XRP', 0)
+
+    if platform == 'kucoin':
+        available_balance += balance['total'].get('USDT', 0)
     
     # Allouer un pourcentage du solde disponible pour l'achat
-    capital_allocation_percentage = 0.5  # Utiliser 50% du capital disponible
+    capital_allocation_percentage = 0.5
     trade_amount = (available_balance * capital_allocation_percentage) / price if platform == 'kucoin' else available_balance * capital_allocation_percentage
     
+    return max(0, trade_amount)
+
     if trade_amount <= 0:
         logger.info(f"Montant à trader trop faible : {trade_amount} {platform}, aucune transaction.")
         return 0
@@ -532,6 +537,10 @@ def arbitrage():
             if kraken_balance['total']['USDT'] < amount_to_trade_kraken and kucoin_balance['total']['USDC'] >= amount_to_trade_kraken:
                 logger.info("Conversion nécessaire: USDC vers USDT sur KuCoin")
                 convert_usdc_to_usdt_kucoin(amount_to_trade_kraken)
+
+            if kucoin_balance['total']['USDT'] >= amount_to_trade_kucoin and kucoin_balance['total']['USDC'] < amount_to_trade_kucoin:
+                logger.info("Conversion nécessaire : USDT vers USDC sur KuCoin")
+                convert_usdt_to_usdc_kucoin(amount_to_trade_kucoin)
 
             # Vérification des montants minimums et arbitrage KuCoin -> Binance
             if amount_to_trade_kucoin > 0 and is_arbitrage_opportunity(kucoin_price, binance_price, 'kucoin', 'binance', min_price_difference_dynamic):
