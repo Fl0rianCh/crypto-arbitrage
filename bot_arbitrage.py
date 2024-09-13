@@ -484,14 +484,11 @@ def calculate_dynamic_price_difference(volatility, base_min_difference=0.0005):
 
 # Fonction pour calculer le montant à investir en fonction des soldes disponibles
 def calculate_trade_amount(balance, price, platform):
-    available_balance = balance['total'].get('USDC' if platform == 'kucoin' else 'XRP', 0)
-
-    # Ajouter le solde USDT si la plateforme est KuCoin
-    if platform == 'kucoin':
-        available_balance += balance['total'].get('USDT', 0)
+    # Prendre en compte USDC et USDT pour KuCoin, sinon XRP pour les autres plateformes
+    available_balance = balance['total'].get('USDC', 0) + balance['total'].get('USDT', 0) if platform == 'kucoin' else balance['total'].get('XRP', 0)
     
     # Allouer un pourcentage du solde disponible pour l'achat
-    capital_allocation_percentage = 0.5
+    capital_allocation_percentage = 0.5  # Utiliser 50% du capital disponible
     trade_amount = (available_balance * capital_allocation_percentage) / price if platform == 'kucoin' else available_balance * capital_allocation_percentage
     
     # Vérifier si le montant à trader est trop faible
@@ -514,6 +511,8 @@ def arbitrage():
             kraken_price = kraken.fetch_ticker('XRP/USDT')['last']  # Kraken : XRP/USDT
             kucoin_price_usdc = kucoin.fetch_ticker('XRP/USDC')['last']  # KuCoin : XRP/USDC
             kucoin_price_usdt = kucoin.fetch_ticker('XRP/USDT')['last']  # KuCoin : XRP/USDT
+
+            kucoin_price = kucoin_price_usdc  # Choisir le prix USDC pour KuCoin (ou USDT selon ton besoin)
 
             # Si tous les prix sont récupérés correctement, les ajouter à l'historique
             price_history.append((binance_price + kucoin_price + kraken_price) / 3)
