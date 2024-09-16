@@ -591,31 +591,7 @@ def transfer_USDC(from_platform, to_platform, amount):
     except Exception as e:
         logger.error(f"Erreur lors du transfert de USDC : {e}")
         send_telegram_message(f"Erreur lors du transfert de USDC de {from_platform} à {to_platform} : {e}")
-
-def transfer_usdt(from_platform, to_platform, amount):
-    try:
-        amount = round(amount, 6)  # Arrondir à 6 décimales
-        # Vérifier et annuler les ordres ouverts avant le transfert
-        check_and_cancel_open_orders()
-
-        # Ensuite, procéder au transfert
-        if from_platform == 'binance' and to_platform == 'kucoin':
-            binance.withdraw('USDT', amount, kucoin.fetch_deposit_address('USDT')['address'])
-        elif from_platform == 'kucoin' and to_platform == 'binance':
-            kucoin.withdraw('USDT', amount, binance.fetch_deposit_address('USDT')['address'])
-        elif from_platform == 'kucoin' and to_platform == 'kraken':
-            kucoin.withdraw('USDT', amount, kraken.fetch_deposit_address('USDT')['address'])
-        elif from_platform == 'kraken' and to_platform == 'kucoin':
-            kraken.withdraw('USDT', amount, kucoin.fetch_deposit_address('USDT')['address'])
-        
-        logger.info(f"Transfert de {amount} USDT de {from_platform} à {to_platform} effectué.")
-        send_telegram_message(f"Transfert de {amount} USDT de {from_platform} à {to_platform} effectué.")
-    
-    except Exception as e:
-        logger.error(f"Erreur lors du transfert de USDT : {e}")
-        send_telegram_message(f"Erreur lors du transfert de USDT de {from_platform} à {to_platform} : {e}")
-        
-        
+     
  def transfer_USDT(from_platform, to_platform, amount):
     try:
         amount = round(amount, 6)  # Arrondir à 6 décimales
@@ -626,10 +602,13 @@ def transfer_usdt(from_platform, to_platform, amount):
             kraken.withdraw('USDT', amount, kucoin.fetch_deposit_address('USDT')['address'])
         logger.info(f"Transfert de {amount} USDT de {from_platform} à {to_platform} effectué.")
         send_telegram_message(f"Transfert de {amount} USDT de {from_platform} à {to_platform} effectué.")
+        
+        logger.info(f"Transfert de {amount} USDT de {from_platform} à {to_platform} effectué.")
+        send_telegram_message(f"Transfert de {amount} USDT de {from_platform} à {to_platform} effectué.")
+    
     except Exception as e:
         logger.error(f"Erreur lors du transfert de USDT : {e}")
         send_telegram_message(f"Erreur lors du transfert de USDT de {from_platform} à {to_platform} : {e}")
-
 
 # Fonction pour calculer la volatilité sur l'historique des prix
 def calculate_volatility(prices):
