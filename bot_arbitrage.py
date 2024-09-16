@@ -149,15 +149,56 @@ def send_telegram_message(message):
         logger.error(f"Exception lors de l'envoi de la notification Telegram : {e}")
 
 # Calcul des frais
-def calculate_fees(amount_traded, price, platform):
+def calculate_fees(amount_traded, price, platform, transaction_type='trade', use_discount=False):
+    """
+    Calculer les frais en fonction de la plateforme, du montant, et du type de transaction.
+    
+    transaction_type peut être : 
+    - 'trade' : pour un achat ou une vente
+    - 'withdrawal' : pour un retrait
+    use_discount : si une réduction est applicable (exemple BNB sur Binance)
+    """
     total_amount = amount_traded * price
-    if platform == 'binance':
-        return total_amount * trading_fee_binance
-    elif platform == 'kucoin':
-        return total_amount * trading_fee_kucoin
-    elif platform == 'kraken':
-        return total_amount * trading_fee_kraken
-    return 0
+    
+    # Définir les frais spécifiques par plateforme et type de transaction
+    fees = {
+        'binance': {
+            'trade': 0.00075,     # 0.075% pour les trades sur Binance
+            'withdrawal': 0.001   # Exemple de frais de retrait (1 pour mille)
+        },
+        'kucoin': {
+            'trade': 0.001,       # 0.1% pour les trades sur KuCoin
+            'withdrawal': 0.0015  # Exemple de frais de retrait (0.15%)
+        },
+        'kraken': {
+            'trade': 0.0016,      # 0.16% pour les trades sur Kraken
+            'withdrawal': 0.002   # Exemple de frais de retrait (0.2%)
+        }
+    }
+
+    # Définir les réductions spécifiques (exemple BNB sur Binance)
+    discounts = {
+        'binance': {
+            'trade': 0.0005  # 0.05% si payé avec BNB
+        }
+    }
+    
+    # Récupérer les frais en fonction de la plateforme et du type de transaction
+    if platform in fees:
+        if transaction_type in fees[platform]:
+            fee_rate = fees[platform][transaction_type]
+            
+            # Appliquer la réduction si applicable
+            if use_discount and platform in discounts and transaction_type in discounts[platform]:
+                fee_rate = discounts[platform][transaction_type]
+                
+            return total_amount * fee_rate
+        else:
+            logger.error(f"Type de transaction non reconnu : {transaction_type} pour la plateforme {platform}")
+            return 0
+    else:
+        logger.error(f"Plateforme non reconnue pour le calcul des frais : {platform}")
+        return 0
 
 # Acheter sur KuCoin
 def buy_on_kucoin(amount, price):
@@ -425,18 +466,18 @@ def calculate_profit(buy_price, sell_price, amount, buy_platform, sell_platform)
 def cancel_open_orders(exchange, platform_name):
     try:
         if platform_name == 'kraken':
-            symbol = 'XRP/USDT'
+            symbol = 'XRP/USDT'  # Exclusivement USDT pour Kraken
         elif platform_name == 'kucoin':
             # Annuler les ordres pour les deux paires sur KuCoin
             symbols = ['XRP/USDC', 'XRP/USDT']
         else:
-            symbol = 'XRP/USDC'
-
+            symbol = 'XRP/USDC'  # Pour les autres plateformes (Binance)
+        
         # Annuler les ordres ouverts
         if platform_name == 'kucoin':
             for symbol in symbols:
                 open_orders = exchange.fetch_open_orders(symbol)
-                if len(open_orders) > 0:
+                if open_orders:
                     logger.info(f"{len(open_orders)} ordres ouverts trouvés sur {platform_name} pour {symbol}, annulation en cours.")
                     for order in open_orders:
                         exchange.cancel_order(order['id'], symbol)
@@ -446,7 +487,7 @@ def cancel_open_orders(exchange, platform_name):
                     logger.info(f"Aucun ordre ouvert sur {platform_name} pour {symbol}.")
         else:
             open_orders = exchange.fetch_open_orders(symbol)
-            if len(open_orders) > 0:
+            if open_orders:
                 logger.info(f"{len(open_orders)} ordres ouverts trouvés sur {platform_name}, annulation en cours.")
                 for order in open_orders:
                     exchange.cancel_order(order['id'], symbol)
@@ -457,6 +498,7 @@ def cancel_open_orders(exchange, platform_name):
     except Exception as e:
         logger.error(f"Erreur lors de l'annulation des ordres sur {platform_name} pour {symbol} : {e}")
         send_telegram_message(f"Erreur lors de l'annulation des ordres sur {platform_name} pour {symbol} : {e}")
+
 
 # Fonction pour vérifier et annuler les ordres ouverts avant chaque transfert
 def check_and_cancel_open_orders():
@@ -553,18 +595,28 @@ def rebalance_portfolios(binance_balance, kucoin_balance, kraken_balance, binanc
 def transfer_xrp(from_platform, to_platform, amount):
     try:
         amount = round(amount, 6)  # Arrondir à 6 décimales
-        # Vérifier et annuler les ordres ouverts avant le transfert
-        check_and_cancel_open_orders()
+        
+        # Suppression de cette ligne qui annule les ordres ouverts
+        # check_and_cancel_open_orders()
 
-        # Ensuite, procéder au transfert
+        from_balance = kucoin.fetch_balance() if from_platform == 'kucoin' else binance.fetch_balance() if from_platform == 'binance' else kraken.fetch_balance()
+        logger.info(f"Solde disponible avant transfert sur {from_platform} : {from_balance['total'].get('XRP', 0)} XRP")
+
+        if from_balance['total'].get('XRP', 0) < amount:
+            logger.error(f"Solde insuffisant pour transférer {amount} XRP de {from_platform} à {to_platform}")
+            send_telegram_message(f"Solde insuffisant pour transférer {amount} XRP de {from_platform} à {to_platform}")
+            return
+
+        # Transfert de XRP
         if from_platform == 'binance' and to_platform == 'kucoin':
             binance.withdraw('XRP', amount, kucoin.fetch_deposit_address('XRP')['address'])
         elif from_platform == 'kucoin' and to_platform == 'binance':
             kucoin.withdraw('XRP', amount, binance.fetch_deposit_address('XRP')['address'])
         elif from_platform == 'kucoin' and to_platform == 'kraken':
-            kucoin.withdraw('XRP', amount, kraken.fetch_deposit_address('XRP')['address'], 'XRP/USDT')  # Spécifier XRP/USDT
+            kucoin.withdraw('XRP', amount, kraken.fetch_deposit_address('XRP')['address'], 'XRP/USDT')
         elif from_platform == 'kraken' and to_platform == 'kucoin':
-            kraken.withdraw('XRP', amount, kucoin.fetch_deposit_address('XRP')['address'], 'XRP/USDT')  # Spécifier XRP/USDT
+            kraken.withdraw('XRP', amount, kucoin.fetch_deposit_address('XRP')['address'], 'XRP/USDT')
+
         logger.info(f"Transfert de {amount} XRP de {from_platform} à {to_platform} effectué.")
         send_telegram_message(f"Transfert de {amount} XRP de {from_platform} à {to_platform} effectué.")
     except Exception as e:
@@ -574,10 +626,17 @@ def transfer_xrp(from_platform, to_platform, amount):
 def transfer_USDC(from_platform, to_platform, amount):
     try:
         amount = round(amount, 6)  # Arrondir à 6 décimales
-        # Vérifier et annuler les ordres ouverts avant le transfert
-        check_and_cancel_open_orders()
 
-        # Ensuite, procéder au transfert
+        # Ajouter le journal pour suivre les soldes avant le transfert
+        from_balance = kucoin.fetch_balance() if from_platform == 'kucoin' else binance.fetch_balance() if from_platform == 'binance' else kraken.fetch_balance()
+        logger.info(f"Solde disponible avant transfert sur {from_platform} : {from_balance['total'].get('USDC', 0)} USDC")
+
+        if from_balance['total'].get('USDC', 0) < amount:
+            logger.error(f"Solde insuffisant pour transférer {amount} USDC de {from_platform} à {to_platform}")
+            send_telegram_message(f"Solde insuffisant pour transférer {amount} USDC de {from_platform} à {to_platform}")
+            return
+
+        # Effectuer le transfert
         if from_platform == 'binance' and to_platform == 'kucoin':
             binance.withdraw('USDC', amount, kucoin.fetch_deposit_address('USDC')['address'])
         elif from_platform == 'kucoin' and to_platform == 'binance':
@@ -586,6 +645,7 @@ def transfer_USDC(from_platform, to_platform, amount):
             kucoin.withdraw('USDC', amount, kraken.fetch_deposit_address('USDC')['address'])
         elif from_platform == 'kraken' and to_platform == 'kucoin':
             kraken.withdraw('USDC', amount, kucoin.fetch_deposit_address('USDC')['address'])
+
         logger.info(f"Transfert de {amount} USDC de {from_platform} à {to_platform} effectué.")
         send_telegram_message(f"Transfert de {amount} USDC de {from_platform} à {to_platform} effectué.")
     except Exception as e:
@@ -595,17 +655,39 @@ def transfer_USDC(from_platform, to_platform, amount):
 def transfer_USDT(from_platform, to_platform, amount):
     try:
         amount = round(amount, 6)  # Arrondir à 6 décimales
-        check_and_cancel_open_orders()
-        if from_platform == 'kucoin' and to_platform == 'kraken':
-            kucoin.withdraw('USDT', amount, kraken.fetch_deposit_address('USDT')['address'])
-        elif from_platform == 'kraken' and to_platform == 'kucoin':
-            kraken.withdraw('USDT', amount, kucoin.fetch_deposit_address('USDT')['address'])
-        logger.info(f"Transfert de {amount} USDT de {from_platform} à {to_platform} effectué.")
-        send_telegram_message(f"Transfert de {amount} USDT de {from_platform} à {to_platform} effectué.")
+        
+        # Ajouter le journal pour suivre les soldes avant le transfert
+        from_balance = kucoin.fetch_balance() if from_platform == 'kucoin' else binance.fetch_balance() if from_platform == 'binance' else kraken.fetch_balance()
+        logger.info(f"Solde disponible avant transfert sur {from_platform} : {from_balance['total'].get('USDT', 0)} USDT")
+
+        if from_balance['total'].get('USDT', 0) < amount:
+            logger.error(f"Solde insuffisant pour transférer {amount} USDT de {from_platform} à {to_platform}")
+            send_telegram_message(f"Solde insuffisant pour transférer {amount} USDT de {from_platform} à {to_platform}")
+            return
+            
+        # Vérifier que l'adresse de dépôt est bien récupérée pour to_platform (la destination)
+        if to_platform == 'kucoin':
+            deposit_address = kucoin.fetch_deposit_address('USDT', {'network': 'ERC20'})['address']
+        elif to_platform == 'kraken':
+            deposit_address = kraken.fetch_deposit_address('USDT', {'network': 'ERC20'})['address']
+        
+        # Vérification supplémentaire pour s'assurer que l'adresse a bien été récupérée
+        if not deposit_address:
+            logger.error(f"Aucune adresse de dépôt USDT disponible pour {to_platform}")
+            send_telegram_message(f"Erreur : Aucune adresse de dépôt USDT pour {to_platform}")
+            return
+
+        # Journal des informations avant le transfert
+        logger.info(f"Adresse de dépôt récupérée pour {to_platform} : {deposit_address}")
+
+        # Effectuer le transfert
+        if from_platform == 'kucoin':
+            kucoin.withdraw('USDT', amount, deposit_address, {'network': 'ERC20'})  # Spécifier le réseau ici
+        elif from_platform == 'kraken':
+            kraken.withdraw('USDT', amount, deposit_address, {'network': 'ERC20'})  # Spécifier le réseau ici
         
         logger.info(f"Transfert de {amount} USDT de {from_platform} à {to_platform} effectué.")
         send_telegram_message(f"Transfert de {amount} USDT de {from_platform} à {to_platform} effectué.")
-    
     except Exception as e:
         logger.error(f"Erreur lors du transfert de USDT : {e}")
         send_telegram_message(f"Erreur lors du transfert de USDT de {from_platform} à {to_platform} : {e}")
@@ -624,10 +706,10 @@ def calculate_trade_amount(balance, price, platform):
     available_balance = balance['total'].get('USDC', 0) + balance['total'].get('USDT', 0) if platform == 'kucoin' else balance['total'].get('XRP', 0)
     
     # Allouer un pourcentage du solde disponible pour l'achat
-    capital_allocation_percentage = 0.5  # Utiliser 50% du capital disponible
+    capital_allocation_percentage = 0.7  # Utiliser 70% du capital disponible
     
-    # Appliquer une marge de sécurité de 2% pour éviter les erreurs de fonds insuffisants
-    available_balance = available_balance * 0.98
+    # Appliquer une marge de sécurité de 5% pour éviter les erreurs de fonds insuffisants
+    available_balance = available_balance * 0.95
     
     # Calculer le montant à trader en fonction du prix et de la plateforme
     if platform == 'kucoin':
