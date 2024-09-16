@@ -592,7 +592,7 @@ def transfer_USDC(from_platform, to_platform, amount):
         logger.error(f"Erreur lors du transfert de USDC : {e}")
         send_telegram_message(f"Erreur lors du transfert de USDC de {from_platform} à {to_platform} : {e}")
      
- def transfer_USDT(from_platform, to_platform, amount):
+def transfer_USDT(from_platform, to_platform, amount):
     try:
         amount = round(amount, 6)  # Arrondir à 6 décimales
         check_and_cancel_open_orders()
