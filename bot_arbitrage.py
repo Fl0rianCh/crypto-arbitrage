@@ -424,18 +424,36 @@ def calculate_profit(buy_price, sell_price, amount, buy_platform, sell_platform)
 
 def cancel_open_orders(exchange, platform_name):
     try:
-        # Utiliser 'XRP/USDT' pour Kraken et 'XRP/USDC' pour les autres plateformes
-        symbol = 'XRP/USDT' if platform_name == 'kraken' else 'XRP/USDC'
-        
-        open_orders = exchange.fetch_open_orders(symbol)
-        if len(open_orders) > 0:
-            logger.info(f"{len(open_orders)} ordres ouverts trouvés sur {platform_name}, annulation en cours.")
-            for order in open_orders:
-                exchange.cancel_order(order['id'], symbol)  # Spécifier un symbole ici aussi
-                logger.info(f"Ordre {order['id']} annulé sur {platform_name}.")
-            send_telegram_message(f"{len(open_orders)} ordres ouverts annulés sur {platform_name} pour {symbol}.")
+        if platform_name == 'kraken':
+            symbol = 'XRP/USDT'
+        elif platform_name == 'kucoin':
+            # Annuler les ordres pour les deux paires sur KuCoin
+            symbols = ['XRP/USDC', 'XRP/USDT']
         else:
-            logger.info(f"Aucun ordre ouvert sur {platform_name}.")
+            symbol = 'XRP/USDC'
+
+        # Annuler les ordres ouverts
+        if platform_name == 'kucoin':
+            for symbol in symbols:
+                open_orders = exchange.fetch_open_orders(symbol)
+                if len(open_orders) > 0:
+                    logger.info(f"{len(open_orders)} ordres ouverts trouvés sur {platform_name} pour {symbol}, annulation en cours.")
+                    for order in open_orders:
+                        exchange.cancel_order(order['id'], symbol)
+                        logger.info(f"Ordre {order['id']} annulé sur {platform_name} pour {symbol}.")
+                    send_telegram_message(f"{len(open_orders)} ordres ouverts annulés sur {platform_name} pour {symbol}.")
+                else:
+                    logger.info(f"Aucun ordre ouvert sur {platform_name} pour {symbol}.")
+        else:
+            open_orders = exchange.fetch_open_orders(symbol)
+            if len(open_orders) > 0:
+                logger.info(f"{len(open_orders)} ordres ouverts trouvés sur {platform_name}, annulation en cours.")
+                for order in open_orders:
+                    exchange.cancel_order(order['id'], symbol)
+                    logger.info(f"Ordre {order['id']} annulé sur {platform_name}.")
+                send_telegram_message(f"{len(open_orders)} ordres ouverts annulés sur {platform_name} pour {symbol}.")
+            else:
+                logger.info(f"Aucun ordre ouvert sur {platform_name}.")
     except Exception as e:
         logger.error(f"Erreur lors de l'annulation des ordres sur {platform_name} pour {symbol} : {e}")
         send_telegram_message(f"Erreur lors de l'annulation des ordres sur {platform_name} pour {symbol} : {e}")
