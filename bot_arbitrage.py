@@ -148,6 +148,17 @@ def send_telegram_message(message):
     except Exception as e:
         logger.error(f"Exception lors de l'envoi de la notification Telegram : {e}")
 
+# Calcul des frais
+def calculate_fees(amount_traded, price, platform):
+    total_amount = amount_traded * price
+    if platform == 'binance':
+        return total_amount * trading_fee_binance
+    elif platform == 'kucoin':
+        return total_amount * trading_fee_kucoin
+    elif platform == 'kraken':
+        return total_amount * trading_fee_kraken
+    return 0
+
 # Acheter sur KuCoin
 def buy_on_kucoin(amount, price):
     try:
