@@ -73,9 +73,9 @@ stop_loss_percentage = 0.005  # Stop-loss à 0,5% sous le prix d'achat
 
 # Répartition idéale en pourcentage
 ideal_allocation = {
-    'binance': {'XRP': 24.5, 'USDC': 10.5},
-    'kraken': {'XRP': 24, 'USDC': 6},
-    'kucoin': {'XRP': 14, 'USDC': 21}
+    'binance': {'XRP': 30, 'USDC': 25},
+    'kraken': {'XRP': 25, 'USDT': 15},
+    'kucoin': {'XRP': 20, 'USDC': 25, 'USDT': 10}
 }
 
 def convert_usdc_to_usdt_kucoin(amount):
@@ -110,7 +110,7 @@ def get_balances():
 
             logger.info(f"Solde Binance (XRP): {binance_balance['total'].get('XRP', 0)} XRP, {binance_balance['total'].get('USDC', 0)} USDC")
             logger.info(f"Solde KuCoin (XRP): {kucoin_balance['total'].get('XRP', 0)} XRP, {kucoin_balance['total'].get('USDC', 0)} USDC, {kucoin_balance['total'].get('USDT', 0)} USDT")
-            logger.info(f"Solde Kraken (XRP): {kraken_balance['total'].get('XRP', 0)} XRP, {kraken_balance['total'].get('USDC', 0)} USDC")
+            logger.info(f"Solde Kraken (XRP): {kraken_balance['total'].get('XRP', 0)} XRP, {kraken_balance['total'].get('USDT', 0)} USDT")
 
             return binance_balance, kucoin_balance, kraken_balance
         except Exception as e:
@@ -151,9 +151,21 @@ def send_telegram_message(message):
 # Acheter sur KuCoin
 def buy_on_kucoin(amount, price):
     try:
+        amount = round(amount, 6)  # Arrondir à 6 décimales
+        fees = calculate_fees(amount, price, 'kucoin')  # Calculer les frais
+        available_balance = kucoin.fetch_balance()['total'].get('USDC', 0)  # Récupérer le solde disponible
+        
+        # Vérification du solde disponible après prise en compte des frais
+        if available_balance < (amount * price + fees):
+            logger.error("Solde insuffisant sur KuCoin après prise en compte des frais")
+            send_telegram_message("Solde insuffisant sur KuCoin pour l'achat")
+            return 0  # Ne pas passer l'ordre
+        
+        # Passer l'ordre d'achat
         order = kucoin.create_limit_buy_order('XRP/USDC', amount, price)
         logger.info(f"Achat de {amount} XRP à {price} USDC sur KuCoin")
         
+        # Suivi de l'exécution de l'ordre
         start_time = time.time()
         while time.time() - start_time < 60:
             try:
@@ -167,6 +179,7 @@ def buy_on_kucoin(amount, price):
                     return  # Si la reconnexion échoue, arrêter la fonction
             time.sleep(5)
 
+        # Annulation de l'ordre après 60 secondes
         kucoin.cancel_order(order['id'])
         logger.warning(f"Ordre annulé après 60 secondes sans exécution : {amount} XRP à {price} USDC sur KuCoin")
 
@@ -179,9 +192,21 @@ def buy_on_kucoin(amount, price):
 # Vendre sur KuCoin
 def sell_on_kucoin(amount, price):
     try:
+        amount = round(amount, 6)  # Arrondir à 6 décimales
+        fees = calculate_fees(amount, price, 'kucoin')  # Calculer les frais
+        available_balance = kucoin.fetch_balance()['total'].get('XRP', 0)  # Récupérer le solde disponible
+        
+        # Vérification du solde disponible après prise en compte des frais
+        if available_balance < amount:
+            logger.error("Solde insuffisant sur KuCoin pour la vente")
+            send_telegram_message("Solde insuffisant sur KuCoin pour la vente")
+            return 0  # Ne pas passer l'ordre
+
+        # Passer l'ordre de vente
         order = kucoin.create_limit_sell_order('XRP/USDC', amount, price)
         logger.info(f"Vente de {amount} XRP à {price} USDC sur KuCoin")
         
+        # Suivi de l'exécution de l'ordre
         start_time = time.time()
         while time.time() - start_time < 60:
             try:
@@ -195,6 +220,7 @@ def sell_on_kucoin(amount, price):
                     return  # Si la reconnexion échoue, arrêter la fonction
             time.sleep(5)
 
+        # Annulation de l'ordre après 60 secondes
         kucoin.cancel_order(order['id'])
         logger.warning(f"Ordre annulé après 60 secondes sans exécution : {amount} XRP à {price} USDC sur KuCoin")
 
@@ -204,12 +230,25 @@ def sell_on_kucoin(amount, price):
             return  # Si la reconnexion échoue, arrêter la fonction
         send_telegram_message(f"Erreur lors de la vente sur KuCoin : {e}")
 
+
 # Acheter sur Binance
 def buy_on_binance(amount, price):
     try:
+        amount = round(amount, 6)  # Arrondir à 6 décimales
+        fees = calculate_fees(amount, price, 'binance')  # Calculer les frais
+        available_balance = binance.fetch_balance()['total'].get('USDC', 0)  # Récupérer le solde disponible
+        
+        # Vérification du solde disponible après prise en compte des frais
+        if available_balance < (amount * price + fees):
+            logger.error("Solde insuffisant sur Binance après prise en compte des frais")
+            send_telegram_message("Solde insuffisant sur Binance pour l'achat")
+            return 0  # Ne pas passer l'ordre
+
+        # Passer l'ordre d'achat
         order = binance.create_limit_buy_order('XRP/USDC', amount, price)
         logger.info(f"Achat de {amount} XRP à {price} USDC sur Binance")
         
+        # Suivi de l'exécution de l'ordre
         start_time = time.time()
         while time.time() - start_time < 60:
             try:
@@ -223,6 +262,7 @@ def buy_on_binance(amount, price):
                     return  # Si la reconnexion échoue, arrêter la fonction
             time.sleep(5)
 
+        # Annulation de l'ordre après 60 secondes
         binance.cancel_order(order['id'])
         logger.warning(f"Ordre annulé après 60 secondes sans exécution : {amount} XRP à {price} USDC sur Binance")
 
@@ -235,9 +275,21 @@ def buy_on_binance(amount, price):
 # Vendre sur Binance
 def sell_on_binance(amount, price):
     try:
+        amount = round(amount, 6)  # Arrondir à 6 décimales
+        fees = calculate_fees(amount, price, 'binance')  # Calculer les frais
+        available_balance = binance.fetch_balance()['total'].get('XRP', 0)  # Récupérer le solde disponible
+        
+        # Vérification du solde disponible avant la vente
+        if available_balance < amount:
+            logger.error("Solde insuffisant sur Binance pour la vente")
+            send_telegram_message("Solde insuffisant sur Binance pour la vente")
+            return 0  # Ne pas passer l'ordre
+
+        # Passer l'ordre de vente
         order = binance.create_limit_sell_order('XRP/USDC', amount, price)
         logger.info(f"Vente de {amount} XRP à {price} USDC sur Binance")
         
+        # Suivi de l'exécution de l'ordre
         start_time = time.time()
         while time.time() - start_time < 60:
             try:
@@ -251,6 +303,7 @@ def sell_on_binance(amount, price):
                     return  # Si la reconnexion échoue, arrêter la fonction
             time.sleep(5)
 
+        # Annuler l'ordre si non exécuté dans les 60 secondes
         binance.cancel_order(order['id'])
         logger.warning(f"Ordre annulé après 60 secondes sans exécution : {amount} XRP à {price} USDC sur Binance")
 
@@ -259,19 +312,32 @@ def sell_on_binance(amount, price):
         if not reconnect('binance'):
             return  # Si la reconnexion échoue, arrêter la fonction
         send_telegram_message(f"Erreur lors de la vente sur Binance : {e}")
+
         
 # Acheter sur Kraken
 def buy_on_kraken(amount, price):
     try:
-        order = kraken.create_limit_buy_order('XRP/USDT', amount, price)
-        logger.info(f"Achat de {amount} XRP à {price} USDC sur Kraken")
+        amount = round(amount, 6)  # Arrondir à 6 décimales
+        fees = calculate_fees(amount, price, 'kraken')  # Calculer les frais
+        available_balance = kraken.fetch_balance()['total'].get('USDT', 0)  # Récupérer le solde disponible
         
+        # Vérification du solde disponible après prise en compte des frais
+        if available_balance < (amount * price + fees):
+            logger.error("Solde insuffisant sur Kraken après prise en compte des frais")
+            send_telegram_message("Solde insuffisant sur Kraken pour l'achat")
+            return 0  # Ne pas passer l'ordre
+        
+        # Passer l'ordre d'achat
+        order = kraken.create_limit_buy_order('XRP/USDT', amount, price)
+        logger.info(f"Achat de {amount} XRP à {price} USDT sur Kraken")
+        
+        # Suivi de l'exécution de l'ordre
         start_time = time.time()
         while time.time() - start_time < 60:
             try:
                 order_status = kraken.fetch_order(order['id'])
                 if order_status['status'] == 'closed':
-                    logger.info(f"Ordre exécuté : {amount} XRP acheté à {price} USDC sur Kraken")
+                    logger.info(f"Ordre exécuté : {amount} XRP acheté à {price} USDT sur Kraken")
                     return
             except Exception as e:
                 logger.error(f"Erreur lors de la récupération du statut de l'ordre sur Kraken : {e}")
@@ -279,8 +345,9 @@ def buy_on_kraken(amount, price):
                     return  # Si la reconnexion échoue, arrêter la fonction
             time.sleep(5)
 
+        # Annuler l'ordre si non exécuté dans les 60 secondes
         kraken.cancel_order(order['id'])
-        logger.warning(f"Ordre annulé après 60 secondes sans exécution : {amount} XRP à {price} USDC sur Kraken")
+        logger.warning(f"Ordre annulé après 60 secondes sans exécution : {amount} XRP à {price} USDT sur Kraken")
 
     except Exception as e:
         logger.error(f"Erreur lors de l'achat sur Kraken : {e}")
@@ -288,18 +355,31 @@ def buy_on_kraken(amount, price):
             return  # Si la reconnexion échoue, arrêter la fonction
         send_telegram_message(f"Erreur lors de l'achat sur Kraken : {e}")
 
+
 # Vendre sur Kraken
 def sell_on_kraken(amount, price):
     try:
-        order = kraken.create_limit_sell_order('XRP/USDT', amount, price)
-        logger.info(f"Vente de {amount} XRP à {price} USDC sur Kraken")
+        amount = round(amount, 6)  # Arrondir à 6 décimales
+        fees = calculate_fees(amount, price, 'kraken')  # Calculer les frais
+        available_balance = kraken.fetch_balance()['total'].get('XRP', 0)  # Récupérer le solde disponible
         
+        # Vérification du solde disponible avant la vente
+        if available_balance < amount:
+            logger.error("Solde insuffisant sur Kraken pour la vente")
+            send_telegram_message("Solde insuffisant sur Kraken pour la vente")
+            return 0  # Ne pas passer l'ordre
+
+        # Passer l'ordre de vente
+        order = kraken.create_limit_sell_order('XRP/USDT', amount, price)
+        logger.info(f"Vente de {amount} XRP à {price} USDT sur Kraken")
+        
+        # Suivi de l'exécution de l'ordre
         start_time = time.time()
         while time.time() - start_time < 60:
             try:
                 order_status = kraken.fetch_order(order['id'])
                 if order_status['status'] == 'closed':
-                    logger.info(f"Ordre exécuté : {amount} XRP vendu à {price} USDC sur Kraken")
+                    logger.info(f"Ordre exécuté : {amount} XRP vendu à {price} USDT sur Kraken")
                     return
             except Exception as e:
                 logger.error(f"Erreur lors de la récupération du statut de l'ordre sur Kraken : {e}")
@@ -307,8 +387,9 @@ def sell_on_kraken(amount, price):
                     return  # Si la reconnexion échoue, arrêter la fonction
             time.sleep(5)
 
+        # Annuler l'ordre si non exécuté dans les 60 secondes
         kraken.cancel_order(order['id'])
-        logger.warning(f"Ordre annulé après 60 secondes sans exécution : {amount} XRP à {price} USDC sur Kraken")
+        logger.warning(f"Ordre annulé après 60 secondes sans exécution : {amount} XRP à {price} USDT sur Kraken")
 
     except Exception as e:
         logger.error(f"Erreur lors de la vente sur Kraken : {e}")
@@ -316,16 +397,6 @@ def sell_on_kraken(amount, price):
             return  # Si la reconnexion échoue, arrêter la fonction
         send_telegram_message(f"Erreur lors de la vente sur Kraken : {e}")
 
-# Fonction pour calculer les frais de transaction sur chaque plateforme
-def calculate_fees(amount_traded, price, platform):
-    total_amount = amount_traded * price
-    if platform == 'binance':
-        return total_amount * trading_fee_binance
-    elif platform == 'kucoin':
-        return total_amount * trading_fee_kucoin
-    elif platform == 'kraken':
-        return total_amount * trading_fee_kraken
-    return 0
 
 # Fonction pour calculer les profits
 def calculate_profit(buy_price, sell_price, amount, buy_platform, sell_platform):
@@ -395,49 +466,58 @@ def get_total_portfolio_value(binance_balance, kucoin_balance, kraken_balance, b
 
 # Fonction pour calculer les écarts et rééquilibrer les portefeuilles
 def rebalance_portfolios(binance_balance, kucoin_balance, kraken_balance, binance_price, kucoin_price, kraken_price):
+    # Calculer la valeur totale du portefeuille en USDC et USDT
     total_value = get_total_portfolio_value(binance_balance, kucoin_balance, kraken_balance, binance_price, kucoin_price, kraken_price)
 
-    # Calculer la valeur idéale en XRP et USDC pour chaque plateforme
+    # Calculer la valeur idéale en XRP et USDC/USDT pour chaque plateforme
     ideal_binance_xrp = (ideal_allocation['binance']['XRP'] / 100) * total_value / binance_price
     ideal_binance_USDC = (ideal_allocation['binance']['USDC'] / 100) * total_value
-    
-    ideal_kraken_xrp = (ideal_allocation['kraken']['XRP'] / 100) * total_value / kraken_price
-    ideal_kraken_USDC = (ideal_allocation['kraken']['USDC'] / 100) * total_value
-    
+
     ideal_kucoin_xrp = (ideal_allocation['kucoin']['XRP'] / 100) * total_value / kucoin_price
     ideal_kucoin_USDC = (ideal_allocation['kucoin']['USDC'] / 100) * total_value
-    
+    ideal_kucoin_USDT = (ideal_allocation['kucoin']['USDT'] / 100) * total_value
+
+    ideal_kraken_xrp = (ideal_allocation['kraken']['XRP'] / 100) * total_value / kraken_price
+    ideal_kraken_USDT = (ideal_allocation['kraken']['USDT'] / 100) * total_value
+
     # Calculer les différences entre le solde actuel et l'idéal pour chaque plateforme
     delta_binance_xrp = ideal_binance_xrp - binance_balance['total'].get('XRP', 0)
     delta_binance_USDC = ideal_binance_USDC - binance_balance['total'].get('USDC', 0)
-    
-    delta_kraken_xrp = ideal_kraken_xrp - kraken_balance['total'].get('XRP', 0)
-    delta_kraken_USDC = ideal_kraken_USDC - kraken_balance['total'].get('USDC', 0)
-    
+
     delta_kucoin_xrp = ideal_kucoin_xrp - kucoin_balance['total'].get('XRP', 0)
     delta_kucoin_USDC = ideal_kucoin_USDC - kucoin_balance['total'].get('USDC', 0)
-    
-    # Transferts pour rééquilibrer
+    delta_kucoin_USDT = ideal_kucoin_USDT - kucoin_balance['total'].get('USDT', 0)
+
+    delta_kraken_xrp = ideal_kraken_xrp - kraken_balance['total'].get('XRP', 0)
+    delta_kraken_USDT = ideal_kraken_USDT - kraken_balance['total'].get('USDT', 0)
+
+    # Transferts pour rééquilibrer le portefeuille
     if delta_binance_xrp > 0:
         transfer_xrp('kucoin', 'binance', delta_binance_xrp)
     if delta_binance_USDC > 0:
         transfer_USDC('kucoin', 'binance', delta_binance_USDC)
-    
+
     if delta_kraken_xrp > 0:
         transfer_xrp('kucoin', 'kraken', delta_kraken_xrp)
-    if delta_kraken_USDC > 0:
-        transfer_USDC('kucoin', 'kraken', delta_kraken_USDC)
-    
+    if delta_kraken_USDT > 0:
+        transfer_USDT('kucoin', 'kraken', delta_kraken_USDT)
+
     if delta_kucoin_xrp > 0:
-        transfer_xrp('binance', 'kucoin', delta_kucoin_xrp)
+        if delta_binance_xrp > 0:
+            transfer_xrp('binance', 'kucoin', delta_kucoin_xrp)
+        elif delta_kraken_xrp > 0:
+            transfer_xrp('kraken', 'kucoin', delta_kucoin_xrp)
     if delta_kucoin_USDC > 0:
         transfer_USDC('binance', 'kucoin', delta_kucoin_USDC)
-    
-    logger.info("Rééquilibrage effectué.")
-    send_telegram_message("Rééquilibrage des portefeuilles effectué.")
+    if delta_kucoin_USDT > 0:
+        transfer_USDT('kraken', 'kucoin', delta_kucoin_USDT)
+
+    logger.info("Rééquilibrage du portefeuille effectué.")
+    send_telegram_message("Rééquilibrage des portefeuilles effectué avec succès.")
 
 def transfer_xrp(from_platform, to_platform, amount):
     try:
+        amount = round(amount, 6)  # Arrondir à 6 décimales
         # Vérifier et annuler les ordres ouverts avant le transfert
         check_and_cancel_open_orders()
 
@@ -447,9 +527,9 @@ def transfer_xrp(from_platform, to_platform, amount):
         elif from_platform == 'kucoin' and to_platform == 'binance':
             kucoin.withdraw('XRP', amount, binance.fetch_deposit_address('XRP')['address'])
         elif from_platform == 'kucoin' and to_platform == 'kraken':
-            kucoin.withdraw('XRP', amount, kraken.fetch_deposit_address('XRP')['address'])
+            kucoin.withdraw('XRP', amount, kraken.fetch_deposit_address('XRP')['address'], 'XRP/USDT')  # Spécifier XRP/USDT
         elif from_platform == 'kraken' and to_platform == 'kucoin':
-            kraken.withdraw('XRP', amount, kucoin.fetch_deposit_address('XRP')['address'])
+            kraken.withdraw('XRP', amount, kucoin.fetch_deposit_address('XRP')['address'], 'XRP/USDT')  # Spécifier XRP/USDT
         logger.info(f"Transfert de {amount} XRP de {from_platform} à {to_platform} effectué.")
         send_telegram_message(f"Transfert de {amount} XRP de {from_platform} à {to_platform} effectué.")
     except Exception as e:
@@ -458,6 +538,7 @@ def transfer_xrp(from_platform, to_platform, amount):
 
 def transfer_USDC(from_platform, to_platform, amount):
     try:
+        amount = round(amount, 6)  # Arrondir à 6 décimales
         # Vérifier et annuler les ordres ouverts avant le transfert
         check_and_cancel_open_orders()
 
@@ -476,6 +557,29 @@ def transfer_USDC(from_platform, to_platform, amount):
         logger.error(f"Erreur lors du transfert de USDC : {e}")
         send_telegram_message(f"Erreur lors du transfert de USDC de {from_platform} à {to_platform} : {e}")
 
+def transfer_usdt(from_platform, to_platform, amount):
+    try:
+        amount = round(amount, 6)  # Arrondir à 6 décimales
+        # Vérifier et annuler les ordres ouverts avant le transfert
+        check_and_cancel_open_orders()
+
+        # Ensuite, procéder au transfert
+        if from_platform == 'binance' and to_platform == 'kucoin':
+            binance.withdraw('USDT', amount, kucoin.fetch_deposit_address('USDT')['address'])
+        elif from_platform == 'kucoin' and to_platform == 'binance':
+            kucoin.withdraw('USDT', amount, binance.fetch_deposit_address('USDT')['address'])
+        elif from_platform == 'kucoin' and to_platform == 'kraken':
+            kucoin.withdraw('USDT', amount, kraken.fetch_deposit_address('USDT')['address'])
+        elif from_platform == 'kraken' and to_platform == 'kucoin':
+            kraken.withdraw('USDT', amount, kucoin.fetch_deposit_address('USDT')['address'])
+        
+        logger.info(f"Transfert de {amount} USDT de {from_platform} à {to_platform} effectué.")
+        send_telegram_message(f"Transfert de {amount} USDT de {from_platform} à {to_platform} effectué.")
+    
+    except Exception as e:
+        logger.error(f"Erreur lors du transfert de USDT : {e}")
+        send_telegram_message(f"Erreur lors du transfert de USDT de {from_platform} à {to_platform} : {e}")
+
 # Fonction pour calculer la volatilité sur l'historique des prix
 def calculate_volatility(prices):
     return np.std(prices) / np.mean(prices)
@@ -491,7 +595,18 @@ def calculate_trade_amount(balance, price, platform):
     
     # Allouer un pourcentage du solde disponible pour l'achat
     capital_allocation_percentage = 0.5  # Utiliser 50% du capital disponible
-    trade_amount = (available_balance * capital_allocation_percentage) / price if platform == 'kucoin' else available_balance * capital_allocation_percentage
+    
+    # Appliquer une marge de sécurité de 2% pour éviter les erreurs de fonds insuffisants
+    available_balance = available_balance * 0.98
+    
+    # Calculer le montant à trader en fonction du prix et de la plateforme
+    if platform == 'kucoin':
+        trade_amount = (available_balance * capital_allocation_percentage) / price
+    else:
+        trade_amount = available_balance * capital_allocation_percentage
+    
+    # Arrondir à 6 décimales pour éviter les erreurs liées aux plateformes
+    trade_amount = round(trade_amount, 6)
     
     # Vérifier si le montant à trader est trop faible
     if trade_amount <= 0:
@@ -499,6 +614,7 @@ def calculate_trade_amount(balance, price, platform):
         return 0
     
     return trade_amount
+
 
 # Fonction principale d'arbitrage avec réinvestissement automatique et rééquilibrage
 def arbitrage():
