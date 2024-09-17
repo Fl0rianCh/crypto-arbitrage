@@ -546,7 +546,7 @@ def rebalance_portfolios(binance_balance, kucoin_balance, kraken_balance, binanc
     # Calculer la valeur totale du portefeuille en USDC et USDT
     total_value = get_total_portfolio_value(binance_balance, kucoin_balance, kraken_balance, binance_price, kucoin_price, kraken_price)
 
-    # Calculer la valeur idéale en XRP et USDC/USDT pour chaque plateforme
+    # Calculer les allocations idéales en XRP et USDC/USDT pour chaque plateforme
     ideal_binance_xrp = (ideal_allocation['binance']['XRP'] / 100) * total_value / binance_price
     ideal_binance_USDC = (ideal_allocation['binance']['USDC'] / 100) * total_value
 
@@ -567,6 +567,50 @@ def rebalance_portfolios(binance_balance, kucoin_balance, kraken_balance, binanc
 
     delta_kraken_xrp = ideal_kraken_xrp - kraken_balance['total'].get('XRP', 0)
     delta_kraken_USDT = ideal_kraken_USDT - kraken_balance['total'].get('USDT', 0)
+
+    # Transferts pour rééquilibrer le portefeuille
+
+    # Vérification des soldes sur Binance et transfert d'XRP si nécessaire
+    if delta_binance_xrp > 0:
+        if kucoin_balance['total'].get('XRP', 0) >= delta_binance_xrp:
+            transfer_xrp('kucoin', 'binance', delta_binance_xrp)
+        elif kraken_balance['total'].get('XRP', 0) >= delta_binance_xrp:
+            transfer_xrp('kraken', 'binance', delta_binance_xrp)
+
+    # Vérification des soldes sur Binance et transfert d'USDC si nécessaire
+    if delta_binance_USDC > 0:
+        if kucoin_balance['total'].get('USDC', 0) >= delta_binance_USDC:
+            transfer_USDC('kucoin', 'binance', delta_binance_USDC)
+
+    # Vérification des soldes sur Kraken et transfert d'XRP si nécessaire
+    if delta_kraken_xrp > 0:
+        if kucoin_balance['total'].get('XRP', 0) >= delta_kraken_xrp:
+            transfer_xrp('kucoin', 'kraken', delta_kraken_xrp)
+
+    # Vérification des soldes sur Kraken et transfert d'USDT si nécessaire
+    if delta_kraken_USDT > 0:
+        if kucoin_balance['total'].get('USDT', 0) >= delta_kraken_USDT:
+            transfer_USDT('kucoin', 'kraken', delta_kraken_USDT)
+
+    # Vérification des soldes sur KuCoin pour XRP et transfert si nécessaire
+    if delta_kucoin_xrp > 0:
+        if binance_balance['total'].get('XRP', 0) >= delta_kucoin_xrp:
+            transfer_xrp('binance', 'kucoin', delta_kucoin_xrp)
+        elif kraken_balance['total'].get('XRP', 0) >= delta_kucoin_xrp:
+            transfer_xrp('kraken', 'kucoin', delta_kucoin_xrp)
+
+    # Vérification des soldes sur KuCoin pour USDC et transfert si nécessaire
+    if delta_kucoin_USDC > 0:
+        if binance_balance['total'].get('USDC', 0) >= delta_kucoin_USDC:
+            transfer_USDC('binance', 'kucoin', delta_kucoin_USDC)
+
+    # Vérification des soldes sur KuCoin pour USDT et transfert si nécessaire
+    if delta_kucoin_USDT > 0:
+        if kraken_balance['total'].get('USDT', 0) >= delta_kucoin_USDT:
+            transfer_USDT('kraken', 'kucoin', delta_kucoin_USDT)
+
+    logger.info("Rééquilibrage du portefeuille effectué.")
+    send_telegram_message("Rééquilibrage des portefeuilles effectué avec succès.")
 
     # Transferts pour rééquilibrer le portefeuille
     if delta_binance_xrp > 0:
@@ -656,7 +700,7 @@ def transfer_USDT(from_platform, to_platform, amount):
     try:
         amount = round(amount, 6)  # Arrondir à 6 décimales
         
-        # Ajouter le journal pour suivre les soldes avant le transfert
+        # Journal des soldes avant transfert
         from_balance = kucoin.fetch_balance() if from_platform == 'kucoin' else binance.fetch_balance() if from_platform == 'binance' else kraken.fetch_balance()
         logger.info(f"Solde disponible avant transfert sur {from_platform} : {from_balance['total'].get('USDT', 0)} USDT")
 
@@ -664,14 +708,15 @@ def transfer_USDT(from_platform, to_platform, amount):
             logger.error(f"Solde insuffisant pour transférer {amount} USDT de {from_platform} à {to_platform}")
             send_telegram_message(f"Solde insuffisant pour transférer {amount} USDT de {from_platform} à {to_platform}")
             return
-            
-        # Vérifier que l'adresse de dépôt est bien récupérée pour to_platform (la destination)
+        
+        # Récupération de l'adresse de dépôt
+        deposit_address = None
         if to_platform == 'kucoin':
             deposit_address = kucoin.fetch_deposit_address('USDT', {'network': 'ERC20'})['address']
         elif to_platform == 'kraken':
             deposit_address = kraken.fetch_deposit_address('USDT', {'network': 'ERC20'})['address']
-        
-        # Vérification supplémentaire pour s'assurer que l'adresse a bien été récupérée
+
+        # Vérification de l'adresse
         if not deposit_address:
             logger.error(f"Aucune adresse de dépôt USDT disponible pour {to_platform}")
             send_telegram_message(f"Erreur : Aucune adresse de dépôt USDT pour {to_platform}")
@@ -682,12 +727,13 @@ def transfer_USDT(from_platform, to_platform, amount):
 
         # Effectuer le transfert
         if from_platform == 'kucoin':
-            kucoin.withdraw('USDT', amount, deposit_address, {'network': 'ERC20'})  # Spécifier le réseau ici
+            kucoin.withdraw('USDT', amount, deposit_address, {'network': 'ERC20'})
         elif from_platform == 'kraken':
-            kraken.withdraw('USDT', amount, deposit_address, {'network': 'ERC20'})  # Spécifier le réseau ici
-        
+            kraken.withdraw('USDT', amount, deposit_address, {'network': 'ERC20'})
+
         logger.info(f"Transfert de {amount} USDT de {from_platform} à {to_platform} effectué.")
         send_telegram_message(f"Transfert de {amount} USDT de {from_platform} à {to_platform} effectué.")
+    
     except Exception as e:
         logger.error(f"Erreur lors du transfert de USDT : {e}")
         send_telegram_message(f"Erreur lors du transfert de USDT de {from_platform} à {to_platform} : {e}")
@@ -698,7 +744,9 @@ def calculate_volatility(prices):
 
 # Fonction pour ajuster dynamiquement le seuil de profit minimal en fonction de la volatilité
 def calculate_dynamic_price_difference(volatility, base_min_difference=0.0005):
-    return base_min_difference * (1 + volatility)
+    dynamic_difference = base_min_difference * (1 + volatility)
+    return max(dynamic_difference, base_min_difference)  # Limiter à un minimum de 0.0005
+
 
 # Fonction pour calculer le montant à investir en fonction des soldes disponibles
 def calculate_trade_amount(balance, price, platform):
