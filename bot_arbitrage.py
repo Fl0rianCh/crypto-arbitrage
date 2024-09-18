@@ -39,7 +39,7 @@ kucoin_api_secret = os.environ.get('kucoin_api_secret')
 kucoin_password = os.environ.get('kucoin_password')
 
 # Load bot token and chat ID
-bot_token = os.environ.get('bot_token')
+bot_token = os.environ.get('telegram_token')
 chat_id = os.environ.get('chat_id')
 
 # Set the minimum time between messages of the Telegram Bot for each trading pair (in seconds)
