@@ -1,246 +1,517 @@
-import ccxt
-import requests
-import logging
-import time
+import ccxt.async_support as ccxt
+import os
+from dotenv import load_dotenv
+import asyncio
+from telegram import Bot
+import pandas as pd
+import math
+from telegram import Update
+from telegram.ext import Updater, MessageHandler, Filters, CallbackContext
+import time 
 from datetime import datetime
+import os.path
+import traceback
+from decimal import Decimal
+import logging
+from decimal import ROUND_DOWN,ROUND_UP
+import asyncio
+from decimal import Decimal, InvalidOperation
 import numpy as np
-from logging.handlers import TimedRotatingFileHandler
 
-# Configuration API Binance
-binance_api_key = 'job6FqJN3HZ0ekXO7uZ245FwCwbLbFIrz0Zrlq4pflUgXoCPw0ehmscdzNv0PGIA'
-binance_secret_key = 'pGUCIqZpKF25EBDZCokGFJbU6aI051wJEPjj0f3TkQWsiKiW2nEgN9nV7Op4D1Ns'
 
-# Configuration API KuCoin
-kucoin_api_key = '66dffc92e72ff9000190a3ae'
-kucoin_secret_key = '786adb6d-03a4-464e-8ed3-15330dc48fc5'
-kucoin_password = 'yD13A5fc18102023$'
+logging.basicConfig(filename='arbitrage.log', level=logging.INFO, format='%(asctime)s %(message)s')
+start_time = time.time()
 
-# Configuration API Kraken
-kraken_api_key = '6P0Taom57ziQjWXRdiq5LZqTZMKRhF6aEMI/Mhz6OWmInmDuvk/eATUr'
-kraken_secret_key = 'I+4fZL3GQmApUXivCLaQpmMFjQ6NIvwvjYACnO/vC9KRVrX0Fm2JNnHx93mu8xOas9YJHd3SNkuDkQYYQtF9XQ=='
+# Load API keys from config.env file
+load_dotenv('config.env')
 
-# Configuration Telegram
-telegram_token = '7501427979:AAE-r03vaNZjuATvSL5FUdAHqn2BjwV0Gok'
-chat_id = '1887133385'
+binance_api_key = os.environ.get('binance_api_key')
+binance_api_secret = os.environ.get('binance_api_secret')
 
-# Connexion aux exchanges
-binance = ccxt.binance({
-    'apiKey': binance_api_key,
-    'secret': binance_secret_key,
+coinbase_api_key = os.environ.get('coinbase_api_key')
+coinbase_api_secret = os.environ.get('coinbase_api_secret')
+
+kraken_api_key = os.environ.get('kraken_api_key')
+kraken_api_secret = os.environ.get('kraken_api_secret')
+
+kucoin_api_key = os.environ.get('kucoin_api_key')
+kucoin_api_secret = os.environ.get('kucoin_api_secret')
+kucoin_password = os.environ.get('kucoin_password')
+
+# Load bot token and chat ID
+bot_token = os.environ.get('bot_token')
+chat_id = os.environ.get('chat_id')
+
+# Set the minimum time between messages of the Telegram Bot for each trading pair (in seconds)
+min_message_interval = 60   # 1 minute
+
+# Create a dictionary to keep track of the last time a message was sent for each trading pair
+last_message_times = {}
+
+#Load exchanges
+
+kraken = ccxt.kraken({
+    'apiKey': kraken_api_key,
+    'secret': kraken_api_secret,
     'enableRateLimit': True
 })
 
 kucoin = ccxt.kucoin({
     'apiKey': kucoin_api_key,
-    'secret': kucoin_secret_key,
+    'secret': kucoin_api_secret,
     'password': kucoin_password,
     'enableRateLimit': True
 })
 
-kraken = ccxt.kraken({
-    'apiKey': kraken_api_key,
-    'secret': kraken_secret_key,
+binance = ccxt.binance({
+    'apiKey': binance_api_key,
+    'secret': binance_api_secret,
     'enableRateLimit': True
 })
 
-# Frais de chaque plateforme
-fees = {
-    'binance': 0.00075,  # 0.075%
-    'kucoin': 0.001,     # 0.1%
-    'kraken': 0.0016     # 0.16%
-}
+coinbase = ccxt.coinbase({
+    'apiKey': coinbase_api_key,
+    'secret': coinbase_api_secret,
+    'enableRateLimit': True
+})
 
-# Paires disponibles par plateforme
-available_pairs = {
-    'binance': ['XRP/USDC'],
-    'kucoin': ['XRP/USDC', 'XRP/USDT'],
-    'kraken': ['XRP/USDC']
-}
 
-# Configuration du logging pour suivre les activités
-log_formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
-log_handler = TimedRotatingFileHandler("arbitrage_bot.log", when="midnight", interval=1, backupCount=7)
-log_handler.setFormatter(log_formatter)
+# Defining function for the telegram Bot, the first is sending message, the second is to stop the script with by sending a message to the bot
+async def send_message(bot_token, chat_id, text):
+    bot = Bot(bot_token)
+    bot.send_message(chat_id=chat_id, text=text)
 
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
-logger.addHandler(log_handler)
+def stop_command(update: Update, context: CallbackContext):
+    global running
+    running = False
+    update.message.reply_text('Stopping script')
 
-# Fonction pour envoyer une notification Telegram
-def send_telegram_message(message):
-    url = f"https://api.telegram.org/bot{telegram_token}/sendMessage"
-    payload = {'chat_id': chat_id, 'text': message}
-    try:
-        response = requests.post(url, data=payload)
-        if response.status_code != 200:
-            logger.error(f"Erreur lors de l'envoi de la notification Telegram : {response.status_code}")
-        else:
-            logger.info(f"Notification Telegram envoyée : {message}")
-    except Exception as e:
-        logger.error(f"Exception lors de l'envoi de la notification Telegram : {e}")
 
-# Fonction pour calculer les profits en prenant en compte les frais
-def calculate_profit(buy_price, sell_price, amount, buy_platform, sell_platform):
-    fee_buy = fees[buy_platform] * buy_price * amount
-    fee_sell = fees[sell_platform] * sell_price * amount
-    profit = (sell_price - buy_price) * amount - (fee_buy + fee_sell)
-    return profit, fee_buy, fee_sell
+# Function for executing trades
+async def execute_trade(exchange, first_symbol, second_symbol, third_symbol, tickers, initial_amount, fee, first_tick_size, second_tick_size, third_tick_size):
 
-# Fonction pour récupérer les soldes sur chaque plateforme
-def get_balances():
-    try:
-        binance_balance = binance.fetch_balance()
-        kucoin_balance = kucoin.fetch_balance()
-        kraken_balance = kraken.fetch_balance()
+    # Use adjusted trades (including fee)
+    first_price = Decimal(tickers[first_symbol]['ask'])
+    first_trade = (initial_amount / first_price) * (1 - Decimal(fee))
+    first_trade = first_trade.quantize(Decimal(str(first_tick_size)), rounding=ROUND_DOWN)
 
-        logger.info(f"Solde Binance: {binance_balance['total']}")
-        logger.info(f"Solde KuCoin: {kucoin_balance['total']}")
-        logger.info(f"Solde Kraken: {kraken_balance['total']}")
+    # Place first order
+    print(f'\nPlacing first order: {first_trade} {first_symbol}')
+    order = await exchange.create_order(first_symbol, 'market', 'buy', float(first_trade))
+    order_id = order['id']
 
-        return binance_balance, kucoin_balance, kraken_balance
-    except Exception as e:
-        logger.error(f"Erreur lors de la récupération des soldes : {e}")
-        send_telegram_message(f"Erreur lors de la récupération des soldes : {e}")
-        return None, None, None
+    # Wait for first order to be filled
+    while True:
+        order = await exchange.fetch_order(order_id, first_symbol)
+        if order['status'] == 'closed':
+            break
+        await asyncio.sleep(1)
 
-# Fonction pour suivre les prix des cryptos sur les 3 plateformes
-def get_prices():
-    try:
-        binance_xrp_usdc = binance.fetch_ticker('XRP/USDC')['last']
-        kucoin_xrp_usdc = kucoin.fetch_ticker('XRP/USDC')['last']
-        kucoin_xrp_usdt = kucoin.fetch_ticker('XRP/USDT')['last']
-        kraken_xrp_usdc = kraken.fetch_ticker('XRP/USDC')['last']
+    # Retrieve actual amount of first trading pair bought
+    first_trade = Decimal(order['filled'])
 
-        prices = {
-            'binance': {'XRP/USDC': binance_xrp_usdc},
-            'kucoin': {'XRP/USDC': kucoin_xrp_usdc, 'XRP/USDT': kucoin_xrp_usdt},
-            'kraken': {'XRP/USDC': kraken_xrp_usdc}
-        }
-        logger.info(f"Prix des cryptos récupérés : {prices}")
-        return prices
-    except Exception as e:
-        logger.error(f"Erreur lors de la récupération des prix : {e}")
-        send_telegram_message(f"Erreur lors de la récupération des prix : {e}")
-        return None
+    # Use the entire amount of first trade for the second order
+    second_trade = first_trade
 
-# Fonction pour détecter une opportunité d'arbitrage
-def detect_arbitrage_opportunity(prices):
-    try:
-        binance_xrp_usdc = prices['binance']['XRP/USDC']
-        kucoin_xrp_usdc = prices['kucoin']['XRP/USDC']
-        kucoin_xrp_usdt = prices['kucoin']['XRP/USDT']
-        kraken_xrp_usdc = prices['kraken']['XRP/USDC']
+    # Place second order
+    print(f'Placing second order: {second_trade} {second_symbol}')
+    order = await exchange.create_order(second_symbol, 'market', 'sell', float(second_trade))
+    order_id = order['id']
 
-        # Comparaison entre Binance et KuCoin (USDC)
-        if kucoin_xrp_usdc < binance_xrp_usdc:
-            logger.info("Opportunité d'arbitrage KuCoin -> Binance (USDC) détectée")
-            return 'kucoin', 'binance', 'XRP/USDC', kucoin_xrp_usdc, binance_xrp_usdc
+    # Wait for second order to be filled
+    while True:
+        order = await exchange.fetch_order(order_id, second_symbol)
+        if order['status'] == 'closed':
+            break
+        await asyncio.sleep(1)
 
-        # Comparaison entre KuCoin (USDT) et Kraken (USDC)
-        if kucoin_xrp_usdt < kraken_xrp_usdc:
-            logger.info("Opportunité d'arbitrage KuCoin -> Kraken (USDT -> USDC) détectée")
-            return 'kucoin', 'kraken', 'XRP/USDT', kucoin_xrp_usdt, kraken_xrp_usdc
+    # Retrieve actual cost of second trading pair
+    second_trade = Decimal(order['cost'])
 
-        logger.info("Aucune opportunité d'arbitrage détectée")
-        return None, None, None, None, None
-    except Exception as e:
-        logger.error(f"Erreur lors de la détection des opportunités : {e}")
-        send_telegram_message(f"Erreur lors de la détection des opportunités : {e}")
-        return None, None, None, None, None
+    # Use the entire cost of second trade for the third order
+    third_trade = second_trade * (1 - Decimal(fee))
 
-# Fonction pour s'assurer que la paire est disponible avant de passer l'ordre
-def check_pair_availability(exchange_name, symbol):
-    if symbol in available_pairs[exchange_name]:
-        return True
-    else:
-        logger.warning(f"La paire {symbol} n'est pas disponible sur {exchange_name}")
-        return False
-
-# Fonction pour acheter sur une plateforme
-def place_buy_order(exchange, symbol, amount, price):
-    try:
-        order = exchange.create_limit_buy_order(symbol, amount, price)
-        logger.info(f"Achat passé pour {amount} {symbol} à {price}")
-        return order
-    except Exception as e:
-        logger.error(f"Erreur lors de l'achat sur {exchange}: {e}")
-        send_telegram_message(f"Erreur lors de l'achat sur {exchange}: {e}")
-        return None
-
-# Fonction pour vendre sur une plateforme
-def place_sell_order(exchange, symbol, amount, price):
-    try:
-        order = exchange.create_limit_sell_order(symbol, amount, price)
-        logger.info(f"Vente passée pour {amount} {symbol} à {price}")
-        return order
-    except Exception as e:
-        logger.error(f"Erreur lors de la vente sur {exchange}: {e}")
-        send_telegram_message(f"Erreur lors de la vente sur {exchange}: {e}")
-        return None
-
-# Fonction pour annuler un ordre après un délai s'il n'est pas exécuté
-def monitor_order_and_cancel(exchange, order_id, symbol, max_wait_time=600):  # 10 minutes = 600 sec
-    start_time = time.time()
-    while time.time() - start_time < max_wait_time:
-        try:
-            order_status = exchange.fetch_order(order_id, symbol)
-            if order_status['status'] == 'closed':
-                logger.info(f"Ordre {order_id} exécuté avec succès")
-                return True
-        except Exception as e:
-            logger.error(f"Erreur lors de la récupération du statut de l'ordre {order_id} : {e}")
-            return False
-
-        time.sleep(60)  # Vérification toutes les minutes
-
-    # Si le délai a expiré, annuler l'ordre
-    try:
-        exchange.cancel_order(order_id, symbol)
-        logger.warning(f"Ordre {order_id} annulé après {max_wait_time} secondes sans exécution.")
-        return False
-    except Exception as e:
-        logger.error(f"Erreur lors de l'annulation de l'ordre {order_id} : {e}")
-        return False
-
-# Fonction principale du bot d'arbitrage
-def arbitrage_bot():
-    logger.info("Le bot d'arbitrage a démarré")
-    send_telegram_message("Le bot d'arbitrage a démarré")
+    # Place third order
+    print(f'Placing third order: {third_trade} {third_symbol}')
+    order = await exchange.create_order(third_symbol, 'market', 'sell', float(third_trade))
+    order_id = order['id']
 
     while True:
-        try:
-            # Récupérer les soldes et les prix
-            binance_balance, kucoin_balance, kraken_balance = get_balances()
-            prices = get_prices()
+        order = await exchange.fetch_order(order_id, third_symbol)
+        if order['status'] == 'closed':
+            break
+        await asyncio.sleep(1)
+    
+    # Fetch final balance
+    balance = await exchange.fetch_balance()
+    final_amount = balance['free']['USDT']
 
-            if not prices:
+    # Calculate profit/loss
+    profit = final_amount - initial_amount
+
+    print(f'Trade completed: Initial amount: {initial_amount}, Final amount: {final_amount}, Profit: {profit}')
+
+    # return profit and final amount if needed for further calculations or logging
+    return profit,  final_amount
+
+
+# Function for calculating the price impact of the order based on the orderbook asks, bids, and volumes
+async def calculate_price_impact(exchange, symbols, order_sizes, sides):
+    logging.info(f'Calculating price impact ')
+    
+    # Fetch order books concurrently
+    order_books = await asyncio.gather(*[exchange.fetch_order_book(symbol) for symbol in symbols])
+    logging.info(f'Order books fetched on {exchange}')
+    price_impacts = []
+
+    for i in range(len(symbols)):
+        symbol = symbols[i]
+        side = sides[i]
+        order_size = float(order_sizes[i])
+        order_book = order_books[i]
+        
+        # If we're buying, we need to look at the asks. If we're selling, we need to look at the bids.
+        orders = np.array(order_book['asks']) if side == 'buy' else np.array(order_book['bids'])
+
+        # Slice orders into prices and volumes
+        prices, volumes = orders[:,0], orders[:,1]
+
+        logging.info(f'Processing order book for {symbol} with side {side} and order size {order_size}')
+        logging.info(f'Order book prices: {prices}')
+        logging.info(f'Order book volumes: {volumes}')
+
+        total_value = 0
+        total_volume = 0
+
+        for j in range(len(prices)):
+            if order_size > 0:
+                volume_for_this_order = min(volumes[j], order_size)
+                value_for_this_order = volume_for_this_order * prices[j]
+
+                logging.info(f'At price level {prices[j]}: volume_for_this_order={volume_for_this_order}, value_for_this_order={value_for_this_order}')
+
+                total_value += value_for_this_order
+                total_volume += volume_for_this_order
+                order_size -= volume_for_this_order
+
+        if order_size <= 0:
+            # Calculate price impact
+            price_impact = total_value / total_volume if total_volume != 0 else None
+            logging.info(f'Price impact for {symbol}: {price_impact}')
+            price_impacts.append(price_impact)
+        else:
+            # If order size was not completely filled, price impact can't be calculated
+            price_impacts.append(None)
+    
+    return price_impacts
+
+#Function for finding triangular arbitrage opportunities for each exchange
+async def find_triangular_arbitrage_opportunities(exchange, markets, tickers, exchange_name, fee, initial_amount ):    
+    
+    logging.info('Finding arbitrage opportunities.')
+    # Read existing trades from CSV file
+    csv_file = 'tri_arb_opportunities.csv'
+    
+    if os.path.exists(csv_file) and os.path.getsize(csv_file) > 0:
+        df = pd.read_csv(csv_file)
+        tri_arb_opportunities = df.to_dict('records')
+    else:
+        tri_arb_opportunities = []
+    
+    # Add a new variable to keep track of the last time a trade was added to the CSV file for each trading pair
+    last_trade_time = {}
+    
+    #load markets data
+    markets = await exchange.load_markets(True)
+    symbols = list(markets.keys())
+    tickers = await exchange.fetch_tickers()
+    
+    # Create a dictionary with all the USDT symbols
+    usdt_symbols = {symbol for symbol in markets.keys() if symbol.endswith('/USDT')}
+    symbols_by_base = {}
+    
+    for symbol in markets.keys():
+        base, quote = symbol.split('/')
+        if base not in symbols_by_base:
+            symbols_by_base[base] = set()
+        symbols_by_base[base].add(symbol)
+    
+    # Split the first symbol in base and quote
+    for usdt_symbol in usdt_symbols:
+        first_symbol = usdt_symbol
+        base, quote = usdt_symbol.split('/')
+        second_base = base
+        second_symbols = symbols_by_base.get(second_base, set())
+        
+        # Loop to find all the possible second symbols
+        for second_symbol in second_symbols:
+            unavailable_pairs = {'YGG/BNB', 'RAD/BNB', 'VOXEL/BNB', 'GLMR/BNB', 'UNI/EUR'}
+            if second_symbol == first_symbol or second_symbol in unavailable_pairs:
                 continue
+            base, quote = second_symbol.split('/')
+            if base == second_base:
+                third_base = quote
+            else:
+                third_base = base
+            # Third symbol 
+            third_symbol = f'{third_base}/USDT'
+            
+            # Check if trading pairs are valid on the exchange
+            if third_symbol in markets and first_symbol in markets and second_symbol in markets:
+                
+                # Retrieve tick size for all trading pairs
+                market = exchange.markets
+                
+                first_market = market[first_symbol]
+                first_tick_size = first_market['precision']['price']
+                
+                second_market = market[second_symbol]
+                second_tick_size = second_market['precision']['price']
+                
+                third_market = market[third_symbol]
+                third_tick_size = third_market['precision']['price']
+                
+                if any(symbol not in tickers for symbol in [first_symbol, second_symbol, third_symbol]):
+                    continue
+                
+                if all(tickers[symbol].get('ask') is not None for symbol in [first_symbol]) and all(tickers[symbol].get('bid') is not None for symbol in [second_symbol, third_symbol]):
+                    first_price = Decimal(tickers[first_symbol]['ask'])
+                    second_price = Decimal(tickers[second_symbol]['bid'])
+                    third_price = Decimal(tickers[third_symbol]['bid'])
+                else:
+                    continue 
+                    
+                # Quantize the prices
+                first_price = first_price.quantize(Decimal(str(first_tick_size)), rounding=ROUND_DOWN)
+                second_price = second_price.quantize(Decimal(str(second_tick_size)), rounding=ROUND_DOWN)
+                third_price = third_price.quantize(Decimal(str(third_tick_size)), rounding=ROUND_DOWN)
 
-            # Détection des opportunités
-            from_exchange, to_exchange, symbol, buy_price, sell_price = detect_arbitrage_opportunity(prices)
-
-            if from_exchange and to_exchange:
-                if not check_pair_availability(from_exchange, symbol) or not check_pair_availability(to_exchange, symbol):
+                if not first_price or not second_price or not third_price:
                     continue
 
-                # Calcul de la quantité à trader
-                amount = min(100, kucoin_balance['total']['XRP'])  # Exemple : utiliser 100 XRP max
-                if from_exchange == 'kucoin' and to_exchange == 'binance':
-                    order_buy = place_buy_order(kucoin, symbol, amount, buy_price)
-                    if order_buy:
-                        order_sell = place_sell_order(binance, symbol, amount, sell_price)
-                        if order_sell:
-                            monitor_order_and_cancel(binance, order_sell['id'], symbol)
+                # Check for zero prices to avoid division by zero
+                if first_price == 0 or second_price == 0 or third_price == 0:
+                    continue
 
-                elif from_exchange == 'kucoin' and to_exchange == 'kraken':
-                    order_buy = place_buy_order(kucoin, symbol, amount, buy_price)
-                    if order_buy:
-                        order_sell = place_sell_order(kraken, symbol, amount, sell_price)
-                        if order_sell:
-                            monitor_order_and_cancel(kraken, order_sell['id'], symbol)
+                #Trades calculation
+                first_trade = initial_amount / first_price
+                first_trade = first_trade.quantize(Decimal(str(first_tick_size)), rounding=ROUND_DOWN)
+                
+                second_trade = first_trade * second_price
+                second_trade = second_trade.quantize(Decimal(str(second_tick_size)), rounding=ROUND_DOWN)
 
-            time.sleep(10)  # Pause avant la prochaine itération
+                third_trade = second_trade * third_price
+                third_trade = third_trade.quantize(Decimal(str(third_tick_size)), rounding=ROUND_DOWN)
+
+                # Check for negative trades
+                if first_trade < 0 or second_trade < 0 or third_trade < 0:
+                    continue
+                
+                # Calculate profits        
+                profit = third_trade - initial_amount
+                profit_percentage = (profit / initial_amount) * 100
+                
+                opportunities = []
+
+                
+                if profit_percentage > 0.3:
+                    logging.info(f'Arbitrage opportunity found. Checking liquidity on {exchange_name}...')
+                    print(f'\rArbitrage opportunities found, checking liquidity', end='\r')
+                    
+                    opportunities.append({
+                        'first_symbol': first_symbol,
+                        'second_symbol': second_symbol,
+                        'third_symbol': third_symbol,
+                        'first_trade': first_trade,
+                        'second_trade': second_trade,
+                        'third_trade': third_trade,
+                        'profit': profit,
+                        'profit_percentage': profit_percentage
+                    })
+
+                    # Sort opportunities by profit percentage in descending order
+                    opportunities.sort(key=lambda x: -x['profit_percentage'])
+
+                    # Take the top 1 or 2 opportunities
+                    top_opportunities = opportunities[:1]  # Change this to the number of opportunities you want to process
+
+                    # Calculate price impacts for top opportunities
+                    for opportunity in top_opportunities:
+                         # Log prices before checking opportunity
+                        logging.info(f'Before opportunity check on {exchange_name}: first_symbol= {first_symbol}, first_price = {first_price}, second_symbol = {second_symbol} second_price = {second_price}, third_symbol = {third_symbol}, third_price = {third_price}, profit percentage: {profit_percentage}')
+
+                        price_impacts = await calculate_price_impact(
+                            exchange,
+                            [opportunity['first_symbol'], opportunity['second_symbol'], opportunity['third_symbol']],
+                            [initial_amount, opportunity['first_trade'], opportunity['second_trade']],
+                            ['buy', 'sell', 'sell']
+                        )
+
+                        # Unpack the results
+                        first_price_impact, second_price_impact, third_price_impact = price_impacts
+
+                        # Quantize the price impacts
+                        first_price_impact = Decimal(first_price_impact).quantize(Decimal(str(first_tick_size)), rounding=ROUND_UP)
+                        second_price_impact = Decimal(second_price_impact).quantize(Decimal(str(second_tick_size)), rounding=ROUND_DOWN)
+                        third_price_impact = Decimal(third_price_impact).quantize(Decimal(str(third_tick_size)), rounding=ROUND_DOWN)
+
+                        # Calculate trades considering price impact and including fees
+                        first_trade_before_fees = initial_amount / first_price_impact 
+                        first_trade_amount = first_trade_before_fees * ( 1- Decimal(fee))
+                        first_trade_amount = first_trade_amount.quantize(Decimal(str(first_tick_size)), rounding=ROUND_DOWN)
+
+                        second_trade_before_fees = first_trade_amount * second_price_impact
+                        second_trade_amount = second_trade_before_fees * (1 - Decimal(fee))  
+                        second_trade_amount = second_trade_amount.quantize(Decimal(str(second_tick_size)), rounding=ROUND_DOWN)
+
+                        third_trade_before_fees = second_trade_amount * third_price_impact
+                        third_trade_amount = third_trade_before_fees * (1 - Decimal(fee))  
+                        third_trade_amount = third_trade_amount.quantize(Decimal(str(third_tick_size)), rounding=ROUND_DOWN)
+
+                        # Check real profit after price impact calculation and fees
+                        real_profit = third_trade_amount - initial_amount
+                        real_profit_percentage = (real_profit / initial_amount) * 100
+
+                        logging.info(f'After liquidity check on {exchange_name}: first_symbol= {first_symbol}, first_price = {first_price_impact}, second_symbol = {second_symbol} second_price = {second_price_impact}, third_symbol = {third_symbol}, third_price = {third_price_impact}, profit percentage: {real_profit_percentage}')
+                        if real_profit_percentage > 0.1:
+                            
+                            logging.info(f'Arbitrage opportunity confirmed on {exchange_name}.')
+
+                            # call execute trades
+                            profit, final_amount = await execute_trade(
+                                exchange,
+                                first_symbol,
+                                second_symbol,
+                                third_symbol,
+                                tickers,
+                                initial_amount ,
+                                fee,
+                                first_tick_size,
+                                second_tick_size,
+                                third_tick_size
+                            )
+                                
+                            print(f'Profitable trade found on {exchange_name}: {first_symbol} -> {second_symbol} -> {third_symbol}. Profit percentage: {real_profit_percentage:.2f}%', 'Profit change after checks: ', real_profit-profit, ' USDT')
+
+                            trade_key = f'{exchange_name}-{first_symbol}-{second_symbol}-{third_symbol}'
+                            current_time = time.time()
+                            last_message_time = last_message_times.get(trade_key, 0)
+                            time_since_last_message = current_time - last_message_time
+
+                            if time_since_last_message > min_message_interval:
+                                message_text = f'Profitable trade found on {exchange_name}: {first_symbol} -> {second_symbol} -> {third_symbol}. Profit: {profit:.2f}. Profit percentage: {profit_percentage:.2f}%'
+                                await send_message(bot_token, chat_id, message_text)
+                                last_message_times[trade_key] = current_time
+
+                            # Check if a trade for the same trading pair has been added to the CSV file within the last minute
+                            last_trade_time_for_pair= last_trade_time.get(trade_key, 0)
+                            time_since_last_trade= current_time - last_trade_time_for_pair
+
+                            # If a trade for the same trading pair has not been added to the CSV file within the last  5 minute,
+                            # append trade_data to trades list and update last_trade_time[trade_key] with current time
+                            if time_since_last_trade> 300:
+                                trade_data= {
+                                    'exchange': exchange_name,
+                                    'order size (USDT)': initial_amount,
+                                    'first_symbol': first_symbol,
+                                    'second_symbol': second_symbol,
+                                    'third_symbol': third_symbol,
+                                    'first_price': first_price_impact,
+                                    'second_price': second_price_impact,
+                                    'third_price': third_price_impact,
+                                    'profit_percentage': real_profit_percentage,
+                                    'time':  datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                                }
+                                tri_arb_opportunities.append(trade_data)
+                                last_trade_time[trade_key]= current_time
+                        else:
+                            logging.info(f'Arbitrage opportunity not confirmed on {exchange_name}.')
+                            # Print arbitrage opportunity message
+                            print(f'\rArbitrage opportunities found, checking liquidity | Opportunities not confirmed', end='\r')     
+
+    # Write updated trades to CSV and Excell file
+    df= pd.DataFrame(tri_arb_opportunities)
+    df.to_csv(csv_file, index=False)
+    
+
+async def main():
+    
+    # Get user input on USDT initial amount
+    while True:
+        initial_amount_input = input("How many USDT do you want to trade? | Only numbers are accepted (in the form 1, 10, 20.1) \nUSDT amount:  ")
+        try:
+            # Try to convert the input to a Decimal
+            initial_amount = Decimal(initial_amount_input)
+            break  # If the conversion succeeds, break out of the loop
+        except InvalidOperation:
+            print("Please enter a valid number.")
+    
+    # Set up the updater and dispatcher
+    updater = Updater(bot_token)
+    dispatcher = updater.dispatcher
+    
+    # Add a command handler for the /stop command
+    dispatcher.add_handler(MessageHandler(Filters.regex('^/stop$'), stop_command))
+    
+    # Start the updater
+    updater.start_polling()
+    
+    # Message from the Telegram Bot
+    await send_message(bot_token, chat_id, "Finding arbitrage opportunities...")
+    global running
+    running = True
+    
+    print('\nFinding arbitrage opportunities...')
+    
+    iteration_count = 1 # initialize iteration counter
+    while running:
+        try:
+            # Load markets and tickers for all exchanges concurrently
+            binance_markets, binance_tickers, kucoin_markets, kucoin_tickers, coinbase_markets, coinbase_tickers, kraken_markets, kraken_tickers = await asyncio.gather(
+                binance.load_markets(True),
+                binance.fetch_tickers(),
+                kucoin.load_markets(True),
+                kucoin.fetch_tickers(),
+                coinbase.load_markets(True),
+                coinbase.fetch_tickers(),
+                kraken.load_markets(True),
+                kraken.fetch_tickers()
+            )
+
+            # Set fees for all exchanges
+            binance_fee = 0.001
+            kucoin_fee = 0.001
+            coinbase_fee = 0.001
+            kraken_fee = 0.002           
+         
+            # Search for arbitrage opportunities on all exchanges concurrently
+            await asyncio.gather(
+                find_triangular_arbitrage_opportunities(binance, binance_markets, binance_tickers, 'Binance', binance_fee, initial_amount),
+                find_triangular_arbitrage_opportunities(kucoin, kucoin_markets, kucoin_tickers, 'Kucoin', kucoin_fee, initial_amount),
+                find_triangular_arbitrage_opportunities(coinbase, coinbase_markets, coinbase_tickers, 'coinbase', coinbase_fee, initial_amount ),
+                find_triangular_arbitrage_opportunities(kraken, kraken_markets, kraken_tickers, 'kraken', kraken_fee, initial_amount )
+            )
+            end_time = time.time()
+            elapsed_time = end_time - start_time
+            # Print elapsed time and number of iterations
+            print(f'\n\rElapsed time: {elapsed_time:.2f} seconds | Number of iterations: {iteration_count}', end='\r')
+
+            iteration_count += 1 # increment iteration counter
+            
+            await asyncio.sleep(10) # sleep for 10 seconds before starting next iteration
+        
         except Exception as e:
-            logger.error(f"Erreur dans le processus d'arbitrage : {e}")
-            send_telegram_message(f"Erreur dans le processus d'arbitrage : {e}")
-            time.sleep(60)  # Attendre avant de réessayer
+            print(f'An error occurred: {e}')
+            traceback.print_exc()
+    
+    # Stop the updater when the script is stopped
+    updater.stop()
+    
+    # Release resources used by the exchange instances
+    await binance.close()
+    await kucoin.close()
+    await coinbase.close()
+    await kraken.close()
+
+if __name__ == "__main__":
+    asyncio.run(main())
