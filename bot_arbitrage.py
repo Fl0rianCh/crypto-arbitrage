@@ -95,11 +95,12 @@ async def load_markets_with_reconnect(exchange, retry_delay=10, max_retries=5):
     return None
 
 # Function to fetch tickers with reconnection logic
-async def fetch_tickers_with_reconnect(exchange, retry_delay=10, max_retries=5):
+async def fetch_specific_tickers_with_reconnect(exchange, symbols, retry_delay=10, max_retries=5):
     retries = 0
     while retries < max_retries:
         try:
-            return await exchange.fetch_tickers()
+            # Fetch only the tickers for the specified symbols
+            return {symbol: await exchange.fetch_ticker(symbol) for symbol in symbols}
         except (ccxt_errors.NetworkError, ccxt_errors.RequestTimeout) as e:
             retries += 1
             logging.error(f"Failed to fetch tickers for {exchange.id}. Attempt {retries}/{max_retries}. Error: {str(e)}")
@@ -184,6 +185,9 @@ async def execute_trade(exchange, first_symbol, second_symbol, third_symbol, tic
     profit = final_amount - initial_amount
 
     print(f'Trade completed: Initial amount: {initial_amount}, Final amount: {final_amount}, Profit: {profit}')
+    
+    # Send Telegram message after trade completion
+    await send_message(bot_token, chat_id, f'Trade completed on {exchange.id}: Initial amount: {initial_amount}, Final amount: {final_amount}, Profit: {profit} USDC')
 
     # return profit and final amount if needed for further calculations or logging
     return profit,  final_amount
@@ -323,9 +327,13 @@ async def find_triangular_arbitrage_opportunities(exchange, markets, tickers, ex
             # Sort opportunities by profit percentage in descending order (optional)
             tri_arb_opportunities.append(opportunities)
 
-    # Write updated trades to CSV
+    # Après avoir écrit les opportunités dans le fichier CSV, vider la liste pour économiser la mémoire
     df = pd.DataFrame(tri_arb_opportunities)
-    df.to_csv(csv_file, index=False) 
+    df.to_csv(csv_file, index=False)
+
+    # Nettoyer la liste pour libérer la mémoire
+    tri_arb_opportunities.clear()
+
 
 async def main():
     # Montant initial par défaut en USDC (exemple : 10 USDC)
@@ -338,10 +346,13 @@ async def main():
     updater.start_polling()
     
     # Envoyer un message à Telegram pour indiquer que le bot démarre
-    await send_message(bot_token, chat_id, "Finding arbitrage opportunities...")
+    await send_message(bot_token, chat_id, "Recherche d'opportunités...")
     
     global running
     running = True
+    
+    # Limiter les paires de trading aux 3 paires spécifiques
+    allowed_pairs = ['BTC/USDC', 'ETH/USDC', 'BTC/ETH']
     
     print('\nFinding arbitrage opportunities...')
     
@@ -382,11 +393,13 @@ async def main():
 
             iteration_count += 1  # Incrémenter le compteur d'itérations
             
-            await asyncio.sleep(10)  # Pause de 10 secondes avant la prochaine itération
+            await asyncio.sleep(20)  # Pause de 10 secondes avant la prochaine itération
         
         except Exception as e:
             logging.error(f"An error occurred: {str(e)}")
             traceback.print_exc()
+            await send_message(bot_token, chat_id, f"Le bot a rencontré une erreur: {str(e)}")
+    
     
     # Arrêter le bot Telegram quand le script est arrêté
     updater.stop()
