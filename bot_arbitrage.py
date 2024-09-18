@@ -1,24 +1,26 @@
 import ccxt.async_support as ccxt
 import os
 from dotenv import load_dotenv
+import ccxt  # ccxt directement
+import os
+from dotenv import load_dotenv
 import asyncio
 from telegram import Bot
 import pandas as pd
 import math
 from telegram import Update
 from telegram.ext import Updater, MessageHandler, Filters, CallbackContext
-import time 
+import time
 from datetime import datetime
 import os.path
 import traceback
 from decimal import Decimal
 import logging
-from decimal import ROUND_DOWN,ROUND_UP
-import asyncio
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_DOWN, ROUND_UP
 import numpy as np
-import ccxt.base.errors as ccxt_errors
 
+# Gestion des erreurs ccxt (corrected import)
+ccxt_errors = ccxt
 
 logging.basicConfig(filename='arbitrage.log', level=logging.INFO, format='%(asctime)s %(message)s')
 start_time = time.time()
