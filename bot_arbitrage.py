@@ -13,9 +13,8 @@ KUCOIN_SECRET_KEY = '786adb6d-03a4-464e-8ed3-15330dc48fc5'
 KUCOIN_PASSWORD = 'yD13A5fc18102023$'
 KRAKEN_API_KEY = '6P0Taom57ziQjWXRdiq5LZqTZMKRhF6aEMI/Mhz6OWmInmDuvk/eATUr'
 KRAKEN_SECRET_KEY = 'I+4fZL3GQmApUXivCLaQpmMFjQ6NIvwvjYACnO/vC9KRVrX0Fm2JNnHx93mu8xOas9YJHd3SNkuDkQYYQtF9XQ=='
-COINBASE_API_KEY = 'cdp_DIK4PBVkHqCAZoP33PdEs_4F9Mmp'
-COINBASE_SECRET_KEY = 'nMHcCAQEEIFq38rkB9y1uUSL0PGspJE6weHmY4Dm0XdO26Gh9gxZNoAoGCCqGSM49\nAwEHoUQDQgAEBFmPkBDBs0Tp71aGdQcmhjeJ2lSP/mYTe+Ne3a9dvuc5HtAJOQiy\nFpcgWbWsf3IO2xod3MWzsXCzeX/iXwZRhA=='
-COINBASE_PASSPHRASE = '131093'
+COINBASE_API_KEY = 'organizations/c03ee59f-5fbb-404a-89ac-8b8e1c191397/apiKeys/4a7b74e7-b89a-48c5-acd4-150b80e0ff48'
+COINBASE_SECRET_KEY = '\nMHcCAQEEIB34hxyaganmSe4DMyPyr0C5yv57e3SVWW0qkY3K4lUMoAoGCCqGSM49\nAwEHoUQDQgAEpT0UijjiiFlKWvGJ+X9/wQxF42SVB3OWn5szy9X24aa3/xh7PcXw\n5TMjURDsP2jw7dW5rIzt6k/djkSESdVm2w=='
 
 # Configuration de l'API Telegram pour les notifications
 TELEGRAM_TOKEN = '7501427979:AAE-r03vaNZjuATvSL5FUdAHqn2BjwV0Gok'
@@ -52,7 +51,6 @@ def connect_to_exchanges():
         coinbase = ccxt.coinbase({
             'apiKey': COINBASE_API_KEY,
             'secret': COINBASE_SECRET_KEY,
-            'password': COINBASE_PASSPHRASE,
         })
         # Charger les marchés une seule fois pour économiser la RAM
         binance.load_markets()
