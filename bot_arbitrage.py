@@ -4,6 +4,7 @@ import logging
 from decimal import Decimal, ROUND_DOWN
 from telegram import Bot
 import datetime
+from coinbase_advanced_py import CoinbaseAdvancedClient
 
 # Configuration des clés API directement dans le script
 BINANCE_API_KEY = 'job6FqJN3HZ0ekXO7uZ245FwCwbLbFIrz0Zrlq4pflUgXoCPw0ehmscdzNv0PGIA'
@@ -48,20 +49,22 @@ def connect_to_exchanges():
             'apiKey': KRAKEN_API_KEY,
             'secret': KRAKEN_SECRET_KEY,
         })
-        coinbase = ccxt.coinbase({
-            'apiKey': COINBASE_API_KEY,
-            'secret': COINBASE_SECRET_KEY,
-        })
-        # Charger les marchés une seule fois pour économiser la RAM
+        
+        # Utilisation du SDK Coinbase Advanced pour Coinbase
+        coinbase = CoinbaseAdvancedClient(
+            api_key=COINBASE_API_KEY,
+            api_secret=COINBASE_SECRET_KEY
+        )
+        
+        # Charger les marchés pour CCXT (Binance, KuCoin, Kraken)
         binance.load_markets()
         kucoin.load_markets()
         kraken.load_markets()
-        coinbase.load_markets()
-        logging.info("Connected to all exchanges successfully")
  
         # Envoyer un message Telegram lorsque le bot démarre avec succès
         send_telegram_message("Arbitrage bot started successfully and connected to all exchanges.")
         
+        logging.info("Connected to all exchanges successfully")
         return binance, kucoin, kraken, coinbase
     except Exception as e:
         logging.error(f"Error connecting to exchanges: {str(e)}")
@@ -94,26 +97,59 @@ def retry_request(func, *args, max_retries=5, delay=2, **kwargs):
 
 # Récupération des frais via l'API CCXT
 def get_trading_fees(exchange, pair):
-    try:
+    if exchange == coinbase:
+        # Frais fixes pour Coinbase, à ajuster si nécessaire
+        return {'maker': Decimal('0.005'), 'taker': Decimal('0.005')}
+    else:
+        try:
         # Récupérer les frais de trading pour la paire spécifiée
-        fees = exchange.fetch_trading_fees()
-        if pair in fees:
-            return fees[pair]
-        else:
-            # Si la paire n'a pas de frais spécifiques, retourner les frais généraux par défaut
-            logging.warning(f"Fees for {pair} not found, using default fees for {exchange.id}")
+            fees = exchange.fetch_trading_fees()
+            if pair in fees:
+                return fees[pair]
+            else:
+                # Si la paire n'a pas de frais spécifiques, retourner les frais généraux par défaut
+                logging.warning(f"Fees for {pair} not found, using default fees for {exchange.id}")
+                return {
+                    'maker': Decimal(fees.get('maker', 0.001)),  # Par défaut 0.1% maker
+                    'taker': Decimal(fees.get('taker', 0.001))   # Par défaut 0.1% taker
+                }
+        except Exception as e:
+            logging.error(f"Error fetching trading fees for {pair} on {exchange.id}: {str(e)}")
+            # Retourner les frais par défaut en cas d'erreur
             return {
-                'maker': Decimal(fees.get('maker', 0.001)),  # Par défaut 0.1% maker
-                'taker': Decimal(fees.get('taker', 0.001))   # Par défaut 0.1% taker
+                'maker': Decimal('0.001'),  # Frais par défaut 0.1% maker
+                'taker': Decimal('0.001')   # Frais par défaut 0.1% taker
             }
-    except Exception as e:
-        logging.error(f"Error fetching trading fees for {pair} on {exchange.id}: {str(e)}")
-        # Retourner les frais par défaut en cas d'erreur
-        return {
-            'maker': Decimal('0.001'),  # Frais par défaut 0.1% maker
-            'taker': Decimal('0.001')   # Frais par défaut 0.1% taker
-        }
         
+# Fonction pour récupérer les prix via Coinbase Advanced API
+def get_coinbase_ticker(pair):
+    try:
+        product_ticker = coinbase.get_product_ticker(pair)
+        price = Decimal(product_ticker['price'])
+        volume = Decimal(product_ticker['volume'])
+        return {
+            'ask': price,
+            'bid': price,  # Pour l'instant, utilisons 'price' comme bid, tu pourrais ajuster en fonction des données renvoyées
+            'quoteVolume': volume
+        }
+    except Exception as e:
+        logging.error(f"Error fetching Coinbase ticker for {pair}: {str(e)}")
+        return None
+ 
+# Passer un ordre sur Coinbase via le SDK
+def place_coinbase_order(pair, side, size):
+    try:
+        order = coinbase.place_order(
+            product_id=pair,
+            side=side,
+            order_type="market",  # Utilisation de l'ordre au marché
+            size=str(size)  # Taille de la transaction
+        )
+        return order
+    except Exception as e:
+        logging.error(f"Error placing {side} order for {pair} on Coinbase: {str(e)}")
+        return None
+ 
 # Fonction d'attente de remplissage d'ordre avec timeout
 def wait_for_order(exchange, order_id, pair, timeout=30):
     start_time = datetime.datetime.now()
@@ -138,44 +174,57 @@ def wait_for_order(exchange, order_id, pair, timeout=30):
 # Fonction pour rechercher des opportunités d'arbitrage triangulaire
 def triangular_arbitrage(exchange, pair1, pair2, pair3):
     try:
-        # Montant à investir pour le premier ordre (ici, 10 USDC)
-        amount_to_invest = Decimal('10')  # Utiliser Decimal pour précision
-        
-        # Récupérer les prix actuels pour les trois paires
-        ticker1 = exchange.fetch_ticker(pair1)
-        ticker2 = exchange.fetch_ticker(pair2)
-        ticker3 = exchange.fetch_ticker(pair3)
-        
-        # Calculer les prix de conversion
-        price1 = Decimal(str(ticker1['ask']))  # Prix d'achat BTC/USDC
-        price2 = Decimal(str(ticker2['ask']))  # Prix d'achat ETH/USDC
-        price3 = Decimal(str(ticker3['bid']))  # Prix de vente BTC/ETH
-        
-        # Vérifier si le volume est suffisant pour chaque paire avant d'exécuter l'arbitrage
-        if ticker1['quoteVolume'] < float(amount_to_invest) or ticker2['quoteVolume'] < float(amount_to_invest) or ticker3['quoteVolume'] < float(amount_to_invest):
-            logging.info(f"Insufficient volume for arbitrage: {pair1}, {pair2}, {pair3}")
-            return  # Si le volume est insuffisant, arrêter ici     
-        
-        # Récupérer les frais spécifiques pour chaque paire
-        fees_pair1 = get_trading_fees(exchange, pair1)
-        fees_pair2 = get_trading_fees(exchange, pair2)
-        fees_pair3 = get_trading_fees(exchange, pair3)
-        
-        fee1 = Decimal(fees_pair1['taker']) if fees_pair1 else Decimal('0.001')  # Frais pour l'ordre d'achat
-        fee2 = Decimal(fees_pair2['taker']) if fees_pair2 else Decimal('0.001')  # Frais pour l'ordre d'achat
-        fee3 = Decimal(fees_pair3['taker']) if fees_pair3 else Decimal('0.001')  # Frais pour l'ordre d'achat
-        
-        # Calcul de l'opportunité d'arbitrage
-        arbitrage_profit = (price1 * price2 * price3).quantize(Decimal('0.00000001'), rounding=ROUND_DOWN)
-        
-        if arbitrage_profit > Decimal(1):
-            logging.info(f"Arbitrage Opportunity Found: {pair1} -> {pair2} -> {pair3} with profit {arbitrage_profit}")
-            send_telegram_message(f"Arbitrage Opportunity: {pair1} -> {pair2} -> {pair3} | Profit: {arbitrage_profit}")
-            
-            # Simuler ou exécuter l'ordre avec 10 USDC
-            execute_trade(exchange, pair1, pair2, pair3, amount_to_invest, tick_size1=0.000001, tick_size2=0.000001, tick_size3=0.000001)
+        if exchange == coinbase:
+            # Utiliser le SDK pour Coinbase
+            ticker1 = get_coinbase_ticker(pair1)
+            ticker2 = get_coinbase_ticker(pair2)
+            ticker3 = get_coinbase_ticker(pair3)
         else:
-            logging.info(f"No arbitrage opportunity for {pair1} -> {pair2} -> {pair3}")
+            # Utiliser CCXT pour les autres exchanges
+            ticker1 = exchange.fetch_ticker(pair1)
+            ticker2 = exchange.fetch_ticker(pair2)
+            ticker3 = exchange.fetch_ticker(pair3)
+
+        if ticker1 is None or ticker2 is None or ticker3 is None:
+            return
+            # Montant à investir pour le premier ordre (ici, 10 USDC)
+            amount_to_invest = Decimal('10')  # Utiliser Decimal pour précision
+            
+            # Récupérer les prix actuels pour les trois paires
+            ticker1 = exchange.fetch_ticker(pair1)
+            ticker2 = exchange.fetch_ticker(pair2)
+            ticker3 = exchange.fetch_ticker(pair3)
+            
+            # Calculer les prix de conversion
+            price1 = Decimal(str(ticker1['ask']))  # Prix d'achat BTC/USDC
+            price2 = Decimal(str(ticker2['ask']))  # Prix d'achat ETH/USDC
+            price3 = Decimal(str(ticker3['bid']))  # Prix de vente BTC/ETH
+            
+            # Vérifier si le volume est suffisant pour chaque paire avant d'exécuter l'arbitrage
+            if ticker1['quoteVolume'] < float(amount_to_invest) or ticker2['quoteVolume'] < float(amount_to_invest) or ticker3['quoteVolume'] < float(amount_to_invest):
+                logging.info(f"Insufficient volume for arbitrage: {pair1}, {pair2}, {pair3}")
+                return  # Si le volume est insuffisant, arrêter ici     
+            
+            # Récupérer les frais spécifiques pour chaque paire
+            fees_pair1 = get_trading_fees(exchange, pair1)
+            fees_pair2 = get_trading_fees(exchange, pair2)
+            fees_pair3 = get_trading_fees(exchange, pair3)
+            
+            fee1 = Decimal(fees_pair1['taker']) if fees_pair1 else Decimal('0.001')  # Frais pour l'ordre d'achat
+            fee2 = Decimal(fees_pair2['taker']) if fees_pair2 else Decimal('0.001')  # Frais pour l'ordre d'achat
+            fee3 = Decimal(fees_pair3['taker']) if fees_pair3 else Decimal('0.001')  # Frais pour l'ordre d'achat
+            
+            # Calcul de l'opportunité d'arbitrage
+            arbitrage_profit = (price1 * price2 * price3).quantize(Decimal('0.00000001'), rounding=ROUND_DOWN)
+            
+            if arbitrage_profit > Decimal(1):
+                logging.info(f"Arbitrage Opportunity Found: {pair1} -> {pair2} -> {pair3} with profit {arbitrage_profit}")
+                send_telegram_message(f"Arbitrage Opportunity: {pair1} -> {pair2} -> {pair3} | Profit: {arbitrage_profit}")
+                
+                # Simuler ou exécuter l'ordre avec 10 USDC
+                execute_trade(exchange, pair1, pair2, pair3, amount_to_invest, tick_size1=0.000001, tick_size2=0.000001, tick_size3=0.000001)
+            else:
+                logging.info(f"No arbitrage opportunity for {pair1} -> {pair2} -> {pair3}")
     except Exception as e:
         logging.error(f"Error in triangular_arbitrage: {str(e)}")
         send_telegram_message(f"Error in triangular_arbitrage: {str(e)}")
@@ -183,83 +232,102 @@ def triangular_arbitrage(exchange, pair1, pair2, pair3):
 # Fonction pour exécuter le trade en tenant compte des frais et des tailles de ticks
 def execute_trade(exchange, pair1, pair2, pair3, amount_to_invest, tick_size1, tick_size2, tick_size3):
     try:
-        # Étape 1: Récupérer les frais pour chaque paire
-        fees_pair1 = get_trading_fees(exchange, pair1)
-        fees_pair2 = get_trading_fees(exchange, pair2)
-        fees_pair3 = get_trading_fees(exchange, pair3)
-        
-        # Assumer que les frais taker sont appliqués (dans le cas d'un ordre au marché)
-        fee1 = fees_pair1['taker'] if fees_pair1 else 0.001  # Appliquer un frais par défaut si non récupérable
-        fee2 = fees_pair2['taker'] if fees_pair2 else 0.001
-        fee3 = fees_pair3['taker'] if fees_pair3 else 0.001
-
-        # Étape 2: Calculer la quantité à acheter pour la première paire, ajustée par les frais
-        ticker1 = exchange.fetch_ticker(pair1)
-        price1 = ticker1['ask']  # Prix d'achat
-        amount_base_currency = (amount_to_invest / price1) * (1 - Decimal(fee1))
-        amount_base_currency = amount_base_currency.quantize(Decimal(str(tick_size1)), rounding=ROUND_DOWN)
-
-        # Passer le premier ordre (achat)
-        logging.info(f'Placing first order: {amount_base_currency} {pair1}')
-        order1 = exchange.create_order(pair1, 'market', 'buy', float(amount_base_currency))
-        order_id1 = order1['id']
-        
-        # Vérifier que l'ordre est rempli
-        while True:
-            order_status = exchange.fetch_order(order_id1, pair1)
-            if order_status['status'] == 'closed':
-                amount_base_currency = Decimal(order_status['filled'])
-                break
+        if exchange == coinbase:
+            # Passer des ordres sur Coinbase via le SDK
+            order1 = place_coinbase_order(pair1, 'buy', amount_to_invest)
+            if order1 is None:
+                return
             time.sleep(1)
 
-        # Étape 3: Calculer la quantité pour la deuxième paire
-        ticker2 = exchange.fetch_ticker(pair2)
-        price2 = ticker2['bid']
-        amount_second_currency = amount_base_currency * price2 * (1 - Decimal(fee2))
-        amount_second_currency = amount_second_currency.quantize(Decimal(str(tick_size2)), rounding=ROUND_DOWN)
-
-        # Passer le deuxième ordre (vente)
-        logging.info(f'Placing second order: {amount_second_currency} {pair2}')
-        order2 = exchange.create_order(pair2, 'market', 'sell', float(amount_second_currency))
-        order_id2 = order2['id']
-        
-        # Vérifier que l'ordre est rempli
-        while True:
-            order_status = exchange.fetch_order(order_id2, pair2)
-            if order_status['status'] == 'closed':
-                amount_second_currency = Decimal(order_status['cost'])
-                break
+            order2 = place_coinbase_order(pair2, 'sell', amount_to_invest)  # Ajuster avec la quantité exacte
+            if order2 is None:
+                return
             time.sleep(1)
 
-        # Étape 4: Calculer la quantité pour la troisième paire
-        ticker3 = exchange.fetch_ticker(pair3)
-        price3 = ticker3['bid']
-        amount_third_currency = amount_second_currency * price3 * (1 - Decimal(fee3))
-        amount_third_currency = amount_third_currency.quantize(Decimal(str(tick_size3)), rounding=ROUND_DOWN)
-
-        # Passer le troisième ordre (vente)
-        logging.info(f'Placing third order: {amount_third_currency} {pair3}')
-        order3 = exchange.create_order(pair3, 'market', 'sell', float(amount_third_currency))
-        order_id3 = order3['id']
-
-        # Vérifier que l'ordre est rempli
-        while True:
-            order_status = exchange.fetch_order(order_id3, pair3)
-            if order_status['status'] == 'closed':
-                logging.info(f'Triangular arbitrage completed: {pair1} -> {pair2} -> {pair3}')
-                break
+            order3 = place_coinbase_order(pair3, 'sell', amount_to_invest)  # Ajuster avec la quantité exacte
+            if order3 is None:
+                return
             time.sleep(1)
 
-        # Message Telegram avec les détails de l'arbitrage terminé et les profits
-        arbitrage_profit = (price1 * price2 * price3).quantize(Decimal('0.00000001'), rounding=ROUND_DOWN)  # Recalcule ou récupère le profit si nécessaire
-        send_telegram_message(f"Executed triangular trade: {pair1}, {pair2}, {pair3} with {amount_to_invest} USDC and profit: {arbitrage_profit}")
+            logging.info(f"Executed triangular trade on Coinbase: {pair1} -> {pair2} -> {pair3}")
+        else:
+            # Étape 1: Récupérer les frais pour chaque paire
+            fees_pair1 = get_trading_fees(exchange, pair1)
+            fees_pair2 = get_trading_fees(exchange, pair2)
+            fees_pair3 = get_trading_fees(exchange, pair3)
+            
+            # Assumer que les frais taker sont appliqués (dans le cas d'un ordre au marché)
+            fee1 = fees_pair1['taker'] if fees_pair1 else 0.001  # Appliquer un frais par défaut si non récupérable
+            fee2 = fees_pair2['taker'] if fees_pair2 else 0.001
+            fee3 = fees_pair3['taker'] if fees_pair3 else 0.001
+
+            # Étape 2: Calculer la quantité à acheter pour la première paire, ajustée par les frais
+            ticker1 = exchange.fetch_ticker(pair1)
+            price1 = ticker1['ask']  # Prix d'achat
+            amount_base_currency = (amount_to_invest / price1) * (1 - Decimal(fee1))
+            amount_base_currency = amount_base_currency.quantize(Decimal(str(tick_size1)), rounding=ROUND_DOWN)
+
+            # Passer le premier ordre (achat)
+            logging.info(f'Placing first order: {amount_base_currency} {pair1}')
+            order1 = exchange.create_order(pair1, 'market', 'buy', float(amount_base_currency))
+            order_id1 = order1['id']
+            
+            # Vérifier que l'ordre est rempli
+            while True:
+                order_status = exchange.fetch_order(order_id1, pair1)
+                if order_status['status'] == 'closed':
+                    amount_base_currency = Decimal(order_status['filled'])
+                    break
+                time.sleep(1)
+
+            # Étape 3: Calculer la quantité pour la deuxième paire
+            ticker2 = exchange.fetch_ticker(pair2)
+            price2 = ticker2['bid']
+            amount_second_currency = amount_base_currency * price2 * (1 - Decimal(fee2))
+            amount_second_currency = amount_second_currency.quantize(Decimal(str(tick_size2)), rounding=ROUND_DOWN)
+
+            # Passer le deuxième ordre (vente)
+            logging.info(f'Placing second order: {amount_second_currency} {pair2}')
+            order2 = exchange.create_order(pair2, 'market', 'sell', float(amount_second_currency))
+            order_id2 = order2['id']
+            
+            # Vérifier que l'ordre est rempli
+            while True:
+                order_status = exchange.fetch_order(order_id2, pair2)
+                if order_status['status'] == 'closed':
+                    amount_second_currency = Decimal(order_status['cost'])
+                    break
+                time.sleep(1)
+
+            # Étape 4: Calculer la quantité pour la troisième paire
+            ticker3 = exchange.fetch_ticker(pair3)
+            price3 = ticker3['bid']
+            amount_third_currency = amount_second_currency * price3 * (1 - Decimal(fee3))
+            amount_third_currency = amount_third_currency.quantize(Decimal(str(tick_size3)), rounding=ROUND_DOWN)
+
+            # Passer le troisième ordre (vente)
+            logging.info(f'Placing third order: {amount_third_currency} {pair3}')
+            order3 = exchange.create_order(pair3, 'market', 'sell', float(amount_third_currency))
+            order_id3 = order3['id']
+
+            # Vérifier que l'ordre est rempli
+            while True:
+                order_status = exchange.fetch_order(order_id3, pair3)
+                if order_status['status'] == 'closed':
+                    logging.info(f'Triangular arbitrage completed: {pair1} -> {pair2} -> {pair3}')
+                    break
+                time.sleep(1)
+
+            # Message Telegram avec les détails de l'arbitrage terminé et les profits
+            arbitrage_profit = (price1 * price2 * price3).quantize(Decimal('0.00000001'), rounding=ROUND_DOWN)  # Recalcule ou récupère le profit si nécessaire
+            send_telegram_message(f"Executed triangular trade: {pair1}, {pair2}, {pair3} with {amount_to_invest} USDC and profit: {arbitrage_profit}")
+            
+            logging.info(f"Executed triangular trade: {pair1}, {pair2}, {pair3} with {amount_to_invest} USDC")
+            
+            logging.info(f"Fees for {pair1}: Maker: {fees_pair1['maker']}, Taker: {fees_pair1['taker']}")
+            logging.info(f"Fees for {pair2}: Maker: {fees_pair2['maker']}, Taker: {fees_pair2['taker']}")
+            logging.info(f"Fees for {pair3}: Maker: {fees_pair3['maker']}, Taker: {fees_pair3['taker']}")
         
-        logging.info(f"Executed triangular trade: {pair1}, {pair2}, {pair3} with {amount_to_invest} USDC")
-        
-        logging.info(f"Fees for {pair1}: Maker: {fees_pair1['maker']}, Taker: {fees_pair1['taker']}")
-        logging.info(f"Fees for {pair2}: Maker: {fees_pair2['maker']}, Taker: {fees_pair2['taker']}")
-        logging.info(f"Fees for {pair3}: Maker: {fees_pair3['maker']}, Taker: {fees_pair3['taker']}")
-    
     except Exception as e:
         logging.error(f"Error executing trade: {str(e)}")
         send_telegram_message(f"Error executing trade: {str(e)}")
