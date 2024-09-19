@@ -19,6 +19,9 @@ import logging
 from decimal import ROUND_DOWN, ROUND_UP
 import numpy as np
 import tracemalloc  # Import tracemalloc pour la gestion de la mémoire
+import psutil
+import time
+import gc
 
 # Gestion des erreurs ccxt (corrected import)
 ccxt_errors = ccxt
@@ -29,12 +32,35 @@ start_time = time.time()
 # Démarrer le suivi de la mémoire
 tracemalloc.start()
 
+def log_memory_usage(message):
+    process = psutil.Process(os.getpid())
+    mem_info = process.memory_info()
+    logging.info(f"{message}: RSS={mem_info.rss / (1024 * 1024):.2f} MB, VMS={mem_info.vms / (1024 * 1024):.2f} MB")
+
 def display_top(snapshot, key_type='lineno', limit=10):
     top_stats = snapshot.statistics(key_type)
     print(f"Top {limit} lignes qui consomment le plus de mémoire :")
     for index, stat in enumerate(top_stats[:limit], 1):
         frame = stat.traceback[0]
         print(f"#{index}: {frame.filename}:{frame.lineno} - {stat.size / 1024:.1f} KiB")
+        
+async def load_markets_with_profiling(exchange):
+    log_memory_usage(f"Before loading markets for {exchange.id}")
+    start_time = time.time()
+    markets = await load_markets_with_reconnect(exchange)
+    elapsed_time = time.time() - start_time
+    log_memory_usage(f"After loading markets for {exchange.id}")
+    logging.info(f"Time taken to load markets for {exchange.id}: {elapsed_time:.2f} seconds")
+    return markets
+
+async def fetch_tickers_with_profiling(exchange, allowed_pairs):
+    log_memory_usage(f"Before fetching tickers for {exchange.id}")
+    start_time = time.time()
+    tickers = await fetch_specific_tickers_with_reconnect(exchange, allowed_pairs)
+    elapsed_time = time.time() - start_time
+    log_memory_usage(f"After fetching tickers for {exchange.id}")
+    logging.info(f"Time taken to fetch tickers for {exchange.id}: {elapsed_time:.2f} seconds")
+    return tickers
 
 # Load API keys from config.env file
 load_dotenv('config.env')
@@ -88,6 +114,11 @@ coinbase = ccxt.coinbase({
     'secret': coinbase_api_secret,
     'enableRateLimit': True
 })
+
+binance.verbose = True
+kucoin.verbose = True
+coinbase.verbose = True
+kraken.verbose = True
 
 # Function to load markets with reconnection logic
 async def load_markets_with_reconnect(exchange, retry_delay=10, max_retries=5):
@@ -350,7 +381,9 @@ async def find_triangular_arbitrage_opportunities(exchange, markets, tickers, ex
     df.to_csv(csv_file, index=False)
 
     # Nettoyer la liste pour libérer la mémoire
-    tri_arb_opportunities.clear()
+    tri_arb_opportunities.clear()  # Nettoyer la mémoire des opportunités
+    gc.collect()  # Forcer le garbage collector
+
 
 
 async def main():
@@ -379,15 +412,37 @@ async def main():
     while running:
         try:
             # Utilisation de la fonction de reconnexion pour charger les marchés et les tickers
+            log_memory_usage("Before loading binance markets")
             binance_markets = await load_markets_with_reconnect(binance)
+            log_memory_usage("After loading binance markets")
+            
+            log_memory_usage("Before loading kucoin markets")
             kucoin_markets = await load_markets_with_reconnect(kucoin)
+            log_memory_usage("After loading kucoin markets")
+            
+            log_memory_usage("Before loading coinbase markets")
             coinbase_markets = await load_markets_with_reconnect(coinbase)
+            log_memory_usage("After loading coinbase markets")
+            
+            log_memory_usage("Before loading kraken markets")
             kraken_markets = await load_markets_with_reconnect(kraken)
+            log_memory_usage("After loading kraken markets")
 
+            log_memory_usage("Before tickers binance markets")
             binance_tickers = await fetch_specific_tickers_with_reconnect(binance, allowed_pairs)
+            log_memory_usage("After tickers binance markets")
+            
+            log_memory_usage("Before tickers kucoin markets")
             kucoin_tickers = await fetch_specific_tickers_with_reconnect(kucoin, allowed_pairs)
+            log_memory_usage("After tickers binance markets")
+            
+            log_memory_usage("Before tickers coinbase markets")
             coinbase_tickers = await fetch_specific_tickers_with_reconnect(coinbase, allowed_pairs)
+            log_memory_usage("After tickers binance markets")
+            
+            log_memory_usage("Before tickers kraken markets")
             kraken_tickers = await fetch_specific_tickers_with_reconnect(kraken, allowed_pairs)
+            log_memory_usage("After tickers binance markets")
 
             if binance_markets and kucoin_markets and coinbase_markets and kraken_markets:
                 # Définir les frais pour chaque plateforme
@@ -409,6 +464,9 @@ async def main():
             kucoin_tickers.clear()
             coinbase_tickers.clear()
             kraken_tickers.clear()
+            
+            gc.collect()  # Force garbage collection
+            log_memory_usage("After garbage collection")
 
             # Afficher le temps écoulé et le nombre d'itérations
             end_time = time.time()
