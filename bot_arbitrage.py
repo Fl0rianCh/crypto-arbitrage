@@ -49,7 +49,7 @@ def connect_to_exchanges():
             'apiKey': KRAKEN_API_KEY,
             'secret': KRAKEN_SECRET_KEY,
         })
-        coinbase = ccxt.coinbasepro({
+        coinbase = ccxt.coinbase({
             'apiKey': COINBASE_API_KEY,
             'secret': COINBASE_SECRET_KEY,
             'password': COINBASE_PASSPHRASE,
@@ -276,25 +276,30 @@ def monitor_arbitrage_opportunities():
     while True:
         try:
             for pair1, pair2, pair3 in pairs_to_watch:
-                try:
-                    triangular_arbitrage(binance, pair1, pair2, pair3)
-                except Exception as e:
-                    logging.error(f"Error in triangular_arbitrage for Binance: {str(e)}")
+                # Vérifier si chaque exchange est connecté avant d'exécuter l'arbitrage
+                if binance is not None:
+                    try:
+                        triangular_arbitrage(binance, pair1, pair2, pair3)
+                    except Exception as e:
+                        logging.error(f"Error in triangular_arbitrage for Binance: {str(e)}")
                 
-                try:
-                    triangular_arbitrage(kucoin, pair1, pair2, pair3)
-                except Exception as e:
-                    logging.error(f"Error in triangular_arbitrage for KuCoin: {str(e)}")
+                if kucoin is not None:
+                    try:
+                        triangular_arbitrage(kucoin, pair1, pair2, pair3)
+                    except Exception as e:
+                        logging.error(f"Error in triangular_arbitrage for KuCoin: {str(e)}")
                 
-                try:
-                    triangular_arbitrage(kraken, pair1, pair2, pair3)
-                except Exception as e:
-                    logging.error(f"Error in triangular_arbitrage for Kraken: {str(e)}")
+                if kraken is not None:
+                    try:
+                        triangular_arbitrage(kraken, pair1, pair2, pair3)
+                    except Exception as e:
+                        logging.error(f"Error in triangular_arbitrage for Kraken: {str(e)}")
                 
-                try:
-                    triangular_arbitrage(coinbase, pair1, pair2, pair3)
-                except Exception as e:
-                    logging.error(f"Error in triangular_arbitrage for Coinbase: {str(e)}")
+                if coinbase is not None:
+                    try:
+                        triangular_arbitrage(coinbase, pair1, pair2, pair3)
+                    except Exception as e:
+                        logging.error(f"Error in triangular_arbitrage for Coinbase: {str(e)}")
             
             time.sleep(10)  # Pause de 10 secondes entre chaque vérification
         except Exception as e:
