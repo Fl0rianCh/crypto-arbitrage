@@ -417,12 +417,12 @@ async def main():
 
         iteration_count += 1  # Incrémenter le compteur d'itérations
             
-            await asyncio.sleep(30)  # Pause de 30 secondes avant la prochaine itération
+        await asyncio.sleep(30)  # Pause de 30 secondes avant la prochaine itération
         
-        except Exception as e:
-            logging.error(f"An error occurred: {str(e)}")
-            traceback.print_exc()
-            await send_message(bot_token, chat_id, f"Le bot a rencontré une erreur: {str(e)}")
+    except Exception as e:
+        logging.error(f"An error occurred: {str(e)}")
+        traceback.print_exc()
+        await send_message(bot_token, chat_id, f"Le bot a rencontré une erreur: {str(e)}")
     
     # Capturer un snapshot final de la mémoire après l'exécution
     snapshot_final = tracemalloc.take_snapshot()
