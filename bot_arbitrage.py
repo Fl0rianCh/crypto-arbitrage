@@ -18,12 +18,23 @@ from decimal import Decimal
 import logging
 from decimal import ROUND_DOWN, ROUND_UP
 import numpy as np
+import tracemalloc  # Import tracemalloc pour la gestion de la mémoire
 
 # Gestion des erreurs ccxt (corrected import)
 ccxt_errors = ccxt
 
 logging.basicConfig(filename='arbitrage.log', level=logging.INFO, format='%(asctime)s %(message)s')
 start_time = time.time()
+
+# Démarrer le suivi de la mémoire
+tracemalloc.start()
+
+def display_top(snapshot, key_type='lineno', limit=10):
+    top_stats = snapshot.statistics(key_type)
+    print(f"Top {limit} lignes qui consomment le plus de mémoire :")
+    for index, stat in enumerate(top_stats[:limit], 1):
+        frame = stat.traceback[0]
+        print(f"#{index}: {frame.filename}:{frame.lineno} - {stat.size / 1024:.1f} KiB")
 
 # Load API keys from config.env file
 load_dotenv('config.env')
@@ -401,14 +412,18 @@ async def main():
 
             iteration_count += 1  # Incrémenter le compteur d'itérations
             
-            await asyncio.sleep(20)  # Pause de 10 secondes avant la prochaine itération
+            await asyncio.sleep(20)  # Pause de 20 secondes avant la prochaine itération
         
         except Exception as e:
             logging.error(f"An error occurred: {str(e)}")
             traceback.print_exc()
             await send_message(bot_token, chat_id, f"Le bot a rencontré une erreur: {str(e)}")
     
-    
+    # Capturer un snapshot final de la mémoire après l'exécution
+    snapshot_final = tracemalloc.take_snapshot()
+    print("Snapshot final de la mémoire après l'exécution")
+    display_top(snapshot_final)
+
     # Arrêter le bot Telegram quand le script est arrêté
     updater.stop()
     
@@ -419,4 +434,9 @@ async def main():
     await kraken.close()
 
 if __name__ == "__main__":
+    # Capture initiale de la mémoire
+    snapshot_initial = tracemalloc.take_snapshot()
+    print("Snapshot initial de la mémoire au démarrage")
+    display_top(snapshot_initial)
+
     asyncio.run(main())
