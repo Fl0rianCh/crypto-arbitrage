@@ -95,12 +95,19 @@ async def load_markets_with_reconnect(exchange, retry_delay=10, max_retries=5):
     return None
 
 # Function to fetch tickers with reconnection logic
+# Optimisation de la fonction fetch_specific_tickers_with_reconnect
 async def fetch_specific_tickers_with_reconnect(exchange, symbols, retry_delay=10, max_retries=5):
     retries = 0
     while retries < max_retries:
         try:
-            # Fetch only the tickers for the specified symbols
-            return {symbol: await exchange.fetch_ticker(symbol) for symbol in symbols}
+            # Limiter la récupération des tickers uniquement aux symboles spécifiques
+            tickers = {}
+            for symbol in symbols:
+                ticker = await exchange.fetch_ticker(symbol)
+                tickers[symbol] = ticker
+
+            return tickers
+
         except (ccxt_errors.NetworkError, ccxt_errors.RequestTimeout) as e:
             retries += 1
             logging.error(f"Failed to fetch tickers for {exchange.id}. Attempt {retries}/{max_retries}. Error: {str(e)}")
@@ -108,6 +115,7 @@ async def fetch_specific_tickers_with_reconnect(exchange, symbols, retry_delay=1
         except Exception as e:
             logging.error(f"Unexpected error for {exchange.id}: {str(e)}")
             break
+
     logging.error(f"Failed to fetch tickers for {exchange.id} after {max_retries} attempts.")
     return None
 
@@ -366,10 +374,10 @@ async def main():
             coinbase_markets = await load_markets_with_reconnect(coinbase)
             kraken_markets = await load_markets_with_reconnect(kraken)
 
-            binance_tickers = await fetch_tickers_with_reconnect(binance)
-            kucoin_tickers = await fetch_tickers_with_reconnect(kucoin)
-            coinbase_tickers = await fetch_tickers_with_reconnect(coinbase)
-            kraken_tickers = await fetch_tickers_with_reconnect(kraken)
+            binance_tickers = await fetch_specific_tickers_with_reconnect(binance, allowed_pairs)
+            kucoin_tickers = await fetch_specific_tickers_with_reconnect(kucoin, allowed_pairs)
+            coinbase_tickers = await fetch_specific_tickers_with_reconnect(coinbase, allowed_pairs)
+            kraken_tickers = await fetch_specific_tickers_with_reconnect(kraken, allowed_pairs)
 
             if binance_markets and kucoin_markets and coinbase_markets and kraken_markets:
                 # Définir les frais pour chaque plateforme
