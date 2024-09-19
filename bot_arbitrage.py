@@ -378,51 +378,51 @@ async def main():
     
     while running:
         try:
-        # Utilisation de la fonction de reconnexion pour charger les marchés et les tickers
-        binance_markets = await load_markets_with_reconnect(binance)
-        kucoin_markets = await load_markets_with_reconnect(kucoin)
-        coinbase_markets = await load_markets_with_reconnect(coinbase)
-        kraken_markets = await load_markets_with_reconnect(kraken)
+            # Utilisation de la fonction de reconnexion pour charger les marchés et les tickers
+            binance_markets = await load_markets_with_reconnect(binance)
+            kucoin_markets = await load_markets_with_reconnect(kucoin)
+            coinbase_markets = await load_markets_with_reconnect(coinbase)
+            kraken_markets = await load_markets_with_reconnect(kraken)
 
-        binance_tickers = await fetch_specific_tickers_with_reconnect(binance, allowed_pairs)
-        kucoin_tickers = await fetch_specific_tickers_with_reconnect(kucoin, allowed_pairs)
-        coinbase_tickers = await fetch_specific_tickers_with_reconnect(coinbase, allowed_pairs)
-        kraken_tickers = await fetch_specific_tickers_with_reconnect(kraken, allowed_pairs)
+            binance_tickers = await fetch_specific_tickers_with_reconnect(binance, allowed_pairs)
+            kucoin_tickers = await fetch_specific_tickers_with_reconnect(kucoin, allowed_pairs)
+            coinbase_tickers = await fetch_specific_tickers_with_reconnect(coinbase, allowed_pairs)
+            kraken_tickers = await fetch_specific_tickers_with_reconnect(kraken, allowed_pairs)
 
-        if binance_markets and kucoin_markets and coinbase_markets and kraken_markets:
-            # Définir les frais pour chaque plateforme
-            binance_fee = 0.00075
-            kucoin_fee = 0.001
-            coinbase_fee = 0.002
-            kraken_fee = 0.0016           
+            if binance_markets and kucoin_markets and coinbase_markets and kraken_markets:
+                # Définir les frais pour chaque plateforme
+                binance_fee = 0.00075
+                kucoin_fee = 0.001
+                coinbase_fee = 0.002
+                kraken_fee = 0.0016           
 
-            # Rechercher des opportunités d'arbitrage en parallèle sur toutes les plateformes
-            await asyncio.gather(
-                find_triangular_arbitrage_opportunities(binance, binance_markets, binance_tickers, 'Binance', binance_fee, initial_amount),
-                find_triangular_arbitrage_opportunities(kucoin, kucoin_markets, kucoin_tickers, 'Kucoin', kucoin_fee, initial_amount),
-                find_triangular_arbitrage_opportunities(coinbase, coinbase_markets, coinbase_tickers, 'Coinbase', coinbase_fee, initial_amount),
-                find_triangular_arbitrage_opportunities(kraken, kraken_markets, kraken_tickers, 'Kraken', kraken_fee, initial_amount)
-            )
+                # Rechercher des opportunités d'arbitrage en parallèle sur toutes les plateformes
+                await asyncio.gather(
+                    find_triangular_arbitrage_opportunities(binance, binance_markets, binance_tickers, 'Binance', binance_fee, initial_amount),
+                    find_triangular_arbitrage_opportunities(kucoin, kucoin_markets, kucoin_tickers, 'Kucoin', kucoin_fee, initial_amount),
+                    find_triangular_arbitrage_opportunities(coinbase, coinbase_markets, coinbase_tickers, 'Coinbase', coinbase_fee, initial_amount),
+                    find_triangular_arbitrage_opportunities(kraken, kraken_markets, kraken_tickers, 'Kraken', kraken_fee, initial_amount)
+                )
 
-        # Libérer explicitement la mémoire après chaque cycle d'appels API
-        binance_tickers.clear()
-        kucoin_tickers.clear()
-        coinbase_tickers.clear()
-        kraken_tickers.clear()
+            # Libérer explicitement la mémoire après chaque cycle d'appels API
+            binance_tickers.clear()
+            kucoin_tickers.clear()
+            coinbase_tickers.clear()
+            kraken_tickers.clear()
 
-        # Afficher le temps écoulé et le nombre d'itérations
-        end_time = time.time()
-        elapsed_time = end_time - start_time
-        print(f'\n\rElapsed time: {elapsed_time:.2f} seconds | Number of iterations: {iteration_count}', end='\r')
+            # Afficher le temps écoulé et le nombre d'itérations
+            end_time = time.time()
+            elapsed_time = end_time - start_time
+            print(f'\n\rElapsed time: {elapsed_time:.2f} seconds | Number of iterations: {iteration_count}', end='\r')
 
-        iteration_count += 1  # Incrémenter le compteur d'itérations
+            iteration_count += 1  # Incrémenter le compteur d'itérations
             
-        await asyncio.sleep(30)  # Pause de 30 secondes avant la prochaine itération
+            await asyncio.sleep(30)  # Pause de 30 secondes avant la prochaine itération
         
-    except Exception as e:
-        logging.error(f"An error occurred: {str(e)}")
-        traceback.print_exc()
-        await send_message(bot_token, chat_id, f"Le bot a rencontré une erreur: {str(e)}")
+        except Exception as e:
+            logging.error(f"An error occurred: {str(e)}")
+            traceback.print_exc()
+            await send_message(bot_token, chat_id, f"Le bot a rencontré une erreur: {str(e)}")
     
     # Capturer un snapshot final de la mémoire après l'exécution
     snapshot_final = tracemalloc.take_snapshot()
