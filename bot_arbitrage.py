@@ -4,7 +4,8 @@ import logging
 from decimal import Decimal, ROUND_DOWN
 from telegram import Bot
 import datetime
-from coinbase_advanced_py import CoinbaseAdvancedClient
+from coinbase_advanced.client import CoinbaseAdvancedClient
+
 
 # Configuration des clés API directement dans le script
 BINANCE_API_KEY = 'job6FqJN3HZ0ekXO7uZ245FwCwbLbFIrz0Zrlq4pflUgXoCPw0ehmscdzNv0PGIA'
