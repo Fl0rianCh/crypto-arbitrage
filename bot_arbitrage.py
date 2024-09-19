@@ -125,7 +125,8 @@ async def load_markets_with_reconnect(exchange, retry_delay=10, max_retries=5):
     retries = 0
     while retries < max_retries:
         try:
-            return await exchange.load_markets(True)
+            # Vérifiez si load_markets est asynchrone dans ccxt.async_support
+            return await exchange.load_markets(True)  # Assurez-vous que load_markets est bien une coroutine async
         except (ccxt_errors.NetworkError, ccxt_errors.RequestTimeout) as e:
             retries += 1
             logging.error(f"Failed to load markets for {exchange.id}. Attempt {retries}/{max_retries}. Error: {str(e)}")
@@ -141,10 +142,10 @@ async def fetch_specific_tickers_with_reconnect(exchange, symbols, retry_delay=1
     retries = 0
     while retries < max_retries:
         try:
-            # Limiter la récupération des tickers uniquement aux symboles spécifiques
+            # Supposons que fetch_ticker est bien une méthode async de ccxt.async_support
             tickers = {}
             for symbol in symbols:
-                ticker = await exchange.fetch_ticker(symbol)
+                ticker = await exchange.fetch_ticker(symbol)  # Assurez-vous que fetch_ticker est bien asynchrone
                 tickers[symbol] = ticker
 
             return tickers
