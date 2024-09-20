@@ -144,7 +144,7 @@ def wait_for_order(exchange, order_id, pair, timeout=30):
 def triangular_arbitrage(exchange, pair1, pair2, pair3):
     try:
         # Montant à investir pour le premier ordre (ici, 10 USDC)
-        amount_to_invest = Decimal('10')  # Utiliser Decimal pour précision
+        amount_to_invest = Decimal('20')  # Utiliser Decimal pour précision
         
         # Récupérer les prix actuels pour les trois paires
         ticker1 = exchange.fetch_ticker(pair1)
@@ -162,10 +162,26 @@ def triangular_arbitrage(exchange, pair1, pair2, pair3):
         # Logguer chaque analyse du marché
         logging.info(f"Market Analysis: {pair1} price1: {price1}, {pair2} price2: {price2}, {pair3} price3: {price3}")
         
-        # Vérifier si le volume est suffisant pour chaque paire avant d'exécuter l'arbitrage
-        if Decimal(ticker1['quoteVolume']) < amount_to_invest or Decimal(ticker2['quoteVolume']) < amount_to_invest or Decimal(ticker3['quoteVolume']) < amount_to_invest:
+       # Vérifier si le volume disponible dans le carnet d'ordres est suffisant pour chaque paire
+        orderbook1 = exchange.fetch_order_book(pair1)
+        orderbook2 = exchange.fetch_order_book(pair2)
+        orderbook3 = exchange.fetch_order_book(pair3)
+
+        # On utilise Decimal pour les prix et les volumes
+        price1 = Decimal(orderbook1['asks'][0][0])  # Prix d'achat (ask)
+        price2 = Decimal(orderbook2['bids'][0][0])  # Prix de vente (bid) pour la paire 2
+        price3 = Decimal(orderbook3['bids'][0][0])  # Prix de vente (bid) pour la paire 3
+
+        volume1 = Decimal(orderbook1['asks'][0][1])  # Volume disponible pour l'achat (ask)
+        volume2 = Decimal(orderbook2['bids'][0][1])  # Volume disponible pour la vente (bid)
+        volume3 = Decimal(orderbook3['bids'][0][1])  # Volume disponible pour la vente (bid) sur la paire 3
+
+        # Vérifier si les volumes disponibles dans le carnet d'ordres sont suffisants
+        if volume1 < amount_to_invest / price1 or \
+           volume2 < (amount_to_invest * price2) or \
+           volume3 < (amount_to_invest * price3):
             logging.info(f"Insufficient volume for arbitrage: {pair1}, {pair2}, {pair3}")
-            return  # Si le volume est insuffisant, arrêter ici     
+            return
         
         # Récupérer les frais spécifiques pour chaque paire
         fees_pair1 = get_trading_fees(exchange, pair1)
@@ -314,7 +330,7 @@ def monitor_arbitrage_opportunities():
                     except Exception as e:
                         logging.error(f"Error in triangular_arbitrage for Kraken: {str(e)}")
             
-            time.sleep(10)  # Pause de 10 secondes entre chaque vérification
+            time.sleep(1)  # Pause de 1 secondes entre chaque vérification
         except Exception as e:
             logging.error(f"Error in monitor_arbitrage_opportunities: {str(e)}")
             send_telegram_message(f"Error in monitor_arbitrage_opportunities: {str(e)}")
