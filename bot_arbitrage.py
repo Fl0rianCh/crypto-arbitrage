@@ -155,7 +155,7 @@ def triangular_arbitrage(exchange, pair1, pair2, pair3):
         # Calculer les prix de conversion
         price1 = Decimal(str(ticker1['ask']))  # Prix d'achat BTC/USDC
         price2 = Decimal(str(ticker2['ask']))  # Prix d'achat ETH/USDC
-        price3 = Decimal(str(ticker3['bid']))  # Prix de vente BTC/ETH
+        price3 = Decimal(str(ticker3['bid']))  # Prix de vente LTC/USDC
         
         # Logguer chaque analyse du marché
         logging.info(f"Market Analysis: {pair1} price1: {price1}, {pair2} price2: {price2}, {pair3} price3: {price3}")
@@ -275,7 +275,7 @@ def execute_trade(exchange, pair1, pair2, pair3, amount_to_invest, tick_size1, t
 
 # Liste des paires à surveiller pour l'arbitrage triangulaire
 pairs_to_watch = [
-    ('BTC/USDC', 'ETH/USDC', 'BTC/ETH'),  # Exemple de trio
+    ('BTC/USDC', 'ETH/USDC', 'LTC/USDC'),  # Exemple de trio
 ]
 
 # Fonction pour surveiller les opportunités d'arbitrage triangulaire
