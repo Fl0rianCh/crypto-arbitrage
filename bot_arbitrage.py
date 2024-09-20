@@ -140,6 +140,15 @@ def wait_for_order(exchange, order_id, pair, timeout=30):
             return None
         time.sleep(1)
 
+# Fonction pour vérifier si le volume disponible est suffisant dans le carnet d'ordres
+def check_orderbook_for_sufficient_volume(orderbook, amount_required, price_level=0):
+    volume_available = Decimal('0')
+    for level in orderbook['asks']:  # Tu peux aussi vérifier les bids si nécessaire
+        volume_available += Decimal(level[1])
+        if volume_available >= amount_required:
+            return True
+    return False
+
 # Fonction pour rechercher des opportunités d'arbitrage triangulaire
 def triangular_arbitrage(exchange, pair1, pair2, pair3):
     try:
@@ -162,24 +171,15 @@ def triangular_arbitrage(exchange, pair1, pair2, pair3):
         # Logguer chaque analyse du marché
         logging.info(f"Market Analysis: {pair1} price1: {price1}, {pair2} price2: {price2}, {pair3} price3: {price3}")
         
-       # Vérifier si le volume disponible dans le carnet d'ordres est suffisant pour chaque paire
+        # Vérifier si le volume disponible dans le carnet d'ordres est suffisant pour chaque paire
         orderbook1 = exchange.fetch_order_book(pair1)
         orderbook2 = exchange.fetch_order_book(pair2)
         orderbook3 = exchange.fetch_order_book(pair3)
 
-        # On utilise Decimal pour les prix et les volumes
-        price1 = Decimal(orderbook1['asks'][0][0])  # Prix d'achat (ask)
-        price2 = Decimal(orderbook2['bids'][0][0])  # Prix de vente (bid) pour la paire 2
-        price3 = Decimal(orderbook3['bids'][0][0])  # Prix de vente (bid) pour la paire 3
-
-        volume1 = Decimal(orderbook1['asks'][0][1])  # Volume disponible pour l'achat (ask)
-        volume2 = Decimal(orderbook2['bids'][0][1])  # Volume disponible pour la vente (bid)
-        volume3 = Decimal(orderbook3['bids'][0][1])  # Volume disponible pour la vente (bid) sur la paire 3
-
-        # Vérifier si les volumes disponibles dans le carnet d'ordres sont suffisants
-        if volume1 < amount_to_invest / price1 or \
-           volume2 < (amount_to_invest * price2) or \
-           volume3 < (amount_to_invest * price3):
+        # Appeler la fonction pour vérifier le volume
+        if not check_orderbook_for_sufficient_volume(orderbook1, amount_to_invest / price1) or \
+           not check_orderbook_for_sufficient_volume(orderbook2, amount_to_invest * price2) or \
+           not check_orderbook_for_sufficient_volume(orderbook3, amount_to_invest * price3):
             logging.info(f"Insufficient volume for arbitrage: {pair1}, {pair2}, {pair3}")
             return
         
