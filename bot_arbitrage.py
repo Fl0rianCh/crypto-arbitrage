@@ -41,9 +41,9 @@ logging.info("Logging system initialized with daily rotation")
 
 # Frais par plateforme (éditables)
 fees = {
-    'binance': 0.001,  # 0.1%
-    'kucoin': 0.001,
-    'kraken': 0.0026,  # 0.26%
+    'binance': 0.00075,  # Supposons une réduction de frais avec BNB
+    'kucoin': 0.0008,    # Supposons une réduction de frais avec KCS
+    'kraken': 0.0026,    # Frais standard pour Kraken
 }
 
 # Création des instances CCXT pour chaque exchange
@@ -145,15 +145,22 @@ def check_orderbook_for_sufficient_volume(orderbook, amount_required, price_leve
     volume_available = Decimal('0')
     for level in orderbook['asks']:  # Tu peux aussi vérifier les 'bids' si nécessaire
         volume_available += Decimal(level[1])
-        if volume_available >= amount_required:
+        if volume_available >= amount_required * Decimal('0.98'):  # Tolérance de 2% sur le volume requis
             return True
     return False
+
+# Appliquer cette vérification dans la fonction d'arbitrage
+if not check_orderbook_for_sufficient_volume(orderbook1, amount_to_invest / price1) or \
+   not check_orderbook_for_sufficient_volume(orderbook2, amount_to_invest * price2) or \
+   not check_orderbook_for_sufficient_volume(orderbook3, amount_to_invest * price3):
+    logging.info(f"Insufficient volume for arbitrage: {pair1}, {pair2}, {pair3}")
+    return
     
 # Fonction pour rechercher des opportunités d'arbitrage triangulaire
 def triangular_arbitrage(exchange, pair1, pair2, pair3):
     try:
         # Montant à investir pour le premier ordre (ici, 10 USDC)
-        amount_to_invest = Decimal('20')  # Utiliser Decimal pour précision
+        amount_to_invest = Decimal('30')  # Utiliser Decimal pour précision
         
         # Récupérer les prix actuels pour les trois paires
         ticker1 = exchange.fetch_ticker(pair1)
@@ -164,9 +171,10 @@ def triangular_arbitrage(exchange, pair1, pair2, pair3):
             return
 
         # Calculer les prix de conversion
-        price1 = Decimal(ticker1['ask'])  # Prix d'achat BTC/USDC
-        price2 = Decimal(ticker2['ask'])  # Prix d'achat ETH/USDC        
-        price3 = Decimal(ticker3['bid'])  # Prix de vente LTC/BTC
+        price1 = Decimal(ticker1['ask']).quantize(Decimal('0.00000001'), rounding=ROUND_DOWN)  # Prix d'achat BTC/USDC
+        price2 = Decimal(ticker2['ask']).quantize(Decimal('0.00000001'), rounding=ROUND_DOWN)  # Prix d'achat ETH/USDC 
+        price3 = Decimal(ticker3['bid']).quantize(Decimal('0.00000001'), rounding=ROUND_DOWN)  # Prix de vente LTC/BTC
+
         
         # Logguer chaque analyse du marché
         logging.info(f"Market Analysis: {pair1} price1: {price1}, {pair2} price2: {price2}, {pair3} price3: {price3}")
@@ -198,13 +206,19 @@ def triangular_arbitrage(exchange, pair1, pair2, pair3):
         fee3 = Decimal(fees_pair3['taker']) if fees_pair3 else Decimal('0.001')  # Frais pour l'ordre d'achat
         
         # Conversion initiale de 10 USDC en BTC
-        btc_amount = (amount_to_invest / price1) * (Decimal('1') - fee1)  # Prendre en compte les frais de la paire BTC/USDC
+        btc_amount = (amount_to_invest / price1) * (Decimal('1') - fee1)
+        btc_amount = btc_amount.quantize(Decimal('0.00000001'), rounding=ROUND_DOWN)  # Arrondi à 8 décimales
+
         
         # Conversion de BTC en ETH
-        eth_amount = btc_amount * price2 * (Decimal('1') - fee2)  # Prendre en compte les frais de la paire ETH/USDC
+        eth_amount = btc_amount * price2 * (Decimal('1') - fee2)
+        eth_amount = eth_amount.quantize(Decimal('0.00000001'), rounding=ROUND_DOWN)  # Arrondi à 8 décimales
+
 
         # Conversion de ETH en LTC
-        ltc_amount = eth_amount * price3 * (Decimal('1') - fee3)  # Prendre en compte les frais de la paire LTC/BTC
+        ltc_amount = eth_amount * price3 * (Decimal('1') - fee3)
+        ltc_amount = ltc_amount.quantize(Decimal('0.00000001'), rounding=ROUND_DOWN)  # Arrondi à 8 décimales
+
 
         # Calcul du profit : Comparer le montant final en LTC avec l'investissement initial en USDC
         arbitrage_profit = (ltc_amount - amount_to_invest).quantize(Decimal('0.00000001'), rounding=ROUND_DOWN)
@@ -231,15 +245,16 @@ def execute_trade(exchange, pair1, pair2, pair3, amount_to_invest, tick_size1, t
         fee1 = Decimal(fees_pair1['taker'])
         
         # Assumer que les frais taker sont appliqués (dans le cas d'un ordre au marché)
-        fee1 = fees_pair1['taker'] if fees_pair1 else 0.001  # Appliquer un frais par défaut si non récupérable
-        fee2 = fees_pair2['taker'] if fees_pair2 else 0.001
-        fee3 = fees_pair3['taker'] if fees_pair3 else 0.001
+        fee1 = Decimal(fees_pair1['taker']).quantize(Decimal('0.00000001'), rounding=ROUND_DOWN) if fees_pair1 else 0.001  # Appliquer un frais par défaut si non récupérable
+        fee2 = Decimal(fees_pair2['taker']).quantize(Decimal('0.00000001'), rounding=ROUND_DOWN) if fees_pair2 else 0.001
+        fee3 = Decimal(fees_pair3['taker']).quantize(Decimal('0.00000001'), rounding=ROUND_DOWN) if fees_pair3 else 0.001
 
         # Étape 2: Calculer la quantité à acheter pour la première paire, ajustée par les frais
         ticker1 = exchange.fetch_ticker(pair1)
-        price1 = Decimal(ticker1['ask'])
+        price1 = Decimal(ticker1['ask']).quantize(Decimal('0.00000001'), rounding=ROUND_DOWN)
         amount_base_currency = (Decimal(amount_to_invest) / Decimal(price1)) * (Decimal('1') - Decimal(fee1))
-        amount_base_currency = amount_base_currency.quantize(Decimal(str(tick_size1)), rounding=ROUND_DOWN)
+        amount_base_currency = amount_base_currency.quantize(Decimal('0.00000001'), rounding=ROUND_DOWN)
+
 
         # Passer le premier ordre (achat)
         logging.info(f'Placing first order: {amount_base_currency} {pair1}')
@@ -250,15 +265,15 @@ def execute_trade(exchange, pair1, pair2, pair3, amount_to_invest, tick_size1, t
         while True:
             order_status = exchange.fetch_order(order_id1, pair1)
             if order_status['status'] == 'closed':
-                amount_base_currency = Decimal(order_status['filled'])
+                amount_base_currency = Decimal(order_status['filled']).quantize(Decimal('0.00000001'), rounding=ROUND_DOWN)
                 break
             time.sleep(1)
 
         # Étape 3: Calculer la quantité pour la deuxième paire
         ticker2 = exchange.fetch_ticker(pair2)
         price2 = ticker2['bid']
-        amount_base_currency = (Decimal(amount_to_invest) / Decimal(price2)) * (Decimal('1') - Decimal(fee2))
-        amount_second_currency = amount_second_currency.quantize(Decimal(str(tick_size2)), rounding=ROUND_DOWN)
+        amount_second_currency = (amount_base_currency * Decimal(price2)) * (Decimal('1') - Decimal(fee2))
+        amount_second_currency = amount_second_currency.quantize(Decimal('0.00000001'), rounding=ROUND_DOWN)
 
         # Passer le deuxième ordre (vente)
         logging.info(f'Placing second order: {amount_second_currency} {pair2}')
@@ -269,15 +284,15 @@ def execute_trade(exchange, pair1, pair2, pair3, amount_to_invest, tick_size1, t
         while True:
             order_status = exchange.fetch_order(order_id2, pair2)
             if order_status['status'] == 'closed':
-                amount_second_currency = Decimal(order_status['cost'])
+                amount_second_currency = Decimal(order_status['cost']).quantize(Decimal('0.00000001'), rounding=ROUND_DOWN)
                 break
             time.sleep(1)
 
         # Étape 4: Calculer la quantité pour la troisième paire
         ticker3 = exchange.fetch_ticker(pair3)
         price3 = ticker3['bid']
-        amount_base_currency = (Decimal(amount_to_invest) / Decimal(price3)) * (Decimal('1') - Decimal(fee3))
-        amount_third_currency = amount_third_currency.quantize(Decimal(str(tick_size3)), rounding=ROUND_DOWN)
+        amount_third_currency = (amount_second_currency * Decimal(price3)) * (Decimal('1') - Decimal(fee3))
+        amount_third_currency = amount_third_currency.quantize(Decimal('0.00000001'), rounding=ROUND_DOWN)
 
         # Passer le troisième ordre (vente)
         logging.info(f'Placing third order: {amount_third_currency} {pair3}')
