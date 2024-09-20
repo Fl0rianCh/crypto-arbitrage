@@ -1,484 +1,299 @@
-import ccxt.async_support as ccxt
-import os
-from dotenv import load_dotenv
-import asyncio
-from telegram import Bot
-import pandas as pd
-import math
-from telegram import Update
-from telegram.ext import Updater, MessageHandler, Filters, CallbackContext
+import ccxt
 import time
-from datetime import datetime
-import os.path
-import traceback
-from decimal import Decimal
 import logging
-from decimal import ROUND_DOWN, ROUND_UP
-import numpy as np
-import tracemalloc  # Import tracemalloc pour la gestion de la mémoire
-import psutil
-import gc
+from decimal import Decimal, ROUND_DOWN
+from telegram import Bot
+import datetime
 
-# Gestion des erreurs ccxt (corrected import)
-ccxt_errors = ccxt
+# Configuration des clés API directement dans le script
+BINANCE_API_KEY = 'job6FqJN3HZ0ekXO7uZ245FwCwbLbFIrz0Zrlq4pflUgXoCPw0ehmscdzNv0PGIA'
+BINANCE_SECRET_KEY = 'pGUCIqZpKF25EBDZCokGFJbU6aI051wJEPjj0f3TkQWsiKiW2nEgN9nV7Op4D1Ns'
+KUCOIN_API_KEY = '66dffc92e72ff9000190a3ae'
+KUCOIN_SECRET_KEY = '786adb6d-03a4-464e-8ed3-15330dc48fc5'
+KUCOIN_PASSWORD = 'yD13A5fc18102023$'
+KRAKEN_API_KEY = '6P0Taom57ziQjWXRdiq5LZqTZMKRhF6aEMI/Mhz6OWmInmDuvk/eATUr'
+KRAKEN_SECRET_KEY = 'I+4fZL3GQmApUXivCLaQpmMFjQ6NIvwvjYACnO/vC9KRVrX0Fm2JNnHx93mu8xOas9YJHd3SNkuDkQYYQtF9XQ=='
 
+# Configuration de l'API Telegram pour les notifications
+TELEGRAM_TOKEN = '7501427979:AAE-r03vaNZjuATvSL5FUdAHqn2BjwV0Gok'
+TELEGRAM_CHAT_ID = '1887133385'
+bot = Bot(token=TELEGRAM_TOKEN)
+
+# Configuration de la journalisation
 logging.basicConfig(filename='arbitrage.log', level=logging.INFO, format='%(asctime)s %(message)s')
-start_time = time.time()
 
-# Démarrer le suivi de la mémoire
-tracemalloc.start()
+# Frais par plateforme (éditables)
+fees = {
+    'binance': 0.001,  # 0.1%
+    'kucoin': 0.001,
+    'kraken': 0.0026,  # 0.26%
+}
 
-def log_memory_usage(message):
-    process = psutil.Process(os.getpid())
-    mem_info = process.memory_info()
-    logging.info(f"{message}: RSS={mem_info.rss / (1024 * 1024):.2f} MB, VMS={mem_info.vms / (1024 * 1024):.2f} MB")
-
-def display_top(snapshot, key_type='lineno', limit=10):
-    top_stats = snapshot.statistics(key_type)
-    print(f"Top {limit} lignes qui consomment le plus de mémoire :")
-    for index, stat in enumerate(top_stats[:limit], 1):
-        frame = stat.traceback[0]
-        print(f"#{index}: {frame.filename}:{frame.lineno} - {stat.size / 1024:.1f} KiB")
+# Création des instances CCXT pour chaque exchange
+def connect_to_exchanges():
+    try:
+        binance = ccxt.binance({
+            'apiKey': BINANCE_API_KEY,
+            'secret': BINANCE_SECRET_KEY,
+        })
+        kucoin = ccxt.kucoin({
+            'apiKey': KUCOIN_API_KEY,
+            'secret': KUCOIN_SECRET_KEY,
+            'password': KUCOIN_PASSWORD,
+        })
+        kraken = ccxt.kraken({
+            'apiKey': KRAKEN_API_KEY,
+            'secret': KRAKEN_SECRET_KEY,
+        })
         
-async def load_markets_with_profiling(exchange):
-    log_memory_usage(f"Before loading markets for {exchange.id}")
-    start_time = time.time()
-    markets = await load_markets_with_reconnect(exchange)
-    elapsed_time = time.time() - start_time
-    log_memory_usage(f"After loading markets for {exchange.id}")
-    logging.info(f"Time taken to load markets for {exchange.id}: {elapsed_time:.2f} seconds")
-    return markets
+        # Charger les marchés pour CCXT (Binance, KuCoin, Kraken)
+        binance.load_markets()
+        kucoin.load_markets()
+        kraken.load_markets()
+ 
+        # Envoyer un message Telegram lorsque le bot démarre avec succès
+        send_telegram_message("Arbitrage bot started successfully and connected to Binance, KuCoin, and Kraken.")
+        
+        logging.info("Connected to Binance, KuCoin, and Kraken successfully")
+        return binance, kucoin, kraken
+    except Exception as e:
+        logging.error(f"Error connecting to exchanges: {str(e)}")
+        try:
+            bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"Error connecting to exchanges: {str(e)}")
+        except Exception as telegram_error:
+            logging.error(f"Error sending Telegram message: {str(telegram_error)}")
+        return None, None, None
 
-async def fetch_tickers_with_profiling(exchange, allowed_pairs):
-    log_memory_usage(f"Before fetching tickers for {exchange.id}")
-    start_time = time.time()
-    tickers = await fetch_specific_tickers_with_reconnect(exchange, allowed_pairs)
-    elapsed_time = time.time() - start_time
-    log_memory_usage(f"After fetching tickers for {exchange.id}")
-    logging.info(f"Time taken to fetch tickers for {exchange.id}: {elapsed_time:.2f} seconds")
-    return tickers
+binance, kucoin, kraken = connect_to_exchanges()
 
-# Load API keys from config.env file
-load_dotenv('config.env')
-
-binance_api_key = os.environ.get('binance_api_key')
-binance_api_secret = os.environ.get('binance_api_secret')
-
-# Coinbase API désactivée, ces variables ne sont plus utilisées
-# coinbase_api_key = os.environ.get('coinbase_api_key')
-# coinbase_api_secret = os.environ.get('coinbase_api_secret')
-
-kraken_api_key = os.environ.get('kraken_api_key')
-kraken_api_secret = os.environ.get('kraken_api_secret')
-
-kucoin_api_key = os.environ.get('kucoin_api_key')
-kucoin_api_secret = os.environ.get('kucoin_api_secret')
-kucoin_password = os.environ.get('kucoin_password')
-
-# Load bot token and chat ID
-bot_token = os.environ.get('telegram_token')
-chat_id = os.environ.get('chat_id')
-
-# Set the minimum time between messages of the Telegram Bot for each trading pair (in seconds)
-min_message_interval = 60   # 1 minute
-
-# Create a dictionary to keep track of the last time a message was sent for each trading pair
-last_message_times = {}
-
-# Load exchanges
-
-kraken = ccxt.kraken({
-    'apiKey': kraken_api_key,
-    'secret': kraken_api_secret,
-    'enableRateLimit': True
-})
-
-kucoin = ccxt.kucoin({
-    'apiKey': kucoin_api_key,
-    'secret': kucoin_api_secret,
-    'password': kucoin_password,
-    'enableRateLimit': True
-})
-
-binance = ccxt.binance({
-    'apiKey': binance_api_key,
-    'secret': binance_api_secret,
-    'enableRateLimit': True
-})
-
-# Désactiver Coinbase sans le supprimer complètement
-# coinbase = ccxt.coinbase({
-#     'apiKey': coinbase_api_key,
-#     'secret': coinbase_api_secret,
-#     'enableRateLimit': True
-# })
-
-binance.verbose = True
-kucoin.verbose = True
-kraken.verbose = True
-
-# Désactiver Coinbase, ne plus utiliser sa partie dans les logs
-# coinbase.verbose = True
-
-# Function to load markets with reconnection logic
-async def load_markets_with_reconnect(exchange, retry_delay=10, max_retries=5):
+# Fonction d'envoi de notifications sur Telegram
+def send_telegram_message(message):
+    try:
+        bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
+    except Exception as e:
+        logging.error(f"Error sending Telegram message: {str(e)}")
+        
+def retry_request(func, *args, max_retries=5, delay=2, **kwargs):
     retries = 0
     while retries < max_retries:
         try:
-            return await exchange.load_markets(True)
-        except (ccxt_errors.NetworkError, ccxt_errors.RequestTimeout) as e:
-            retries += 1
-            logging.error(f"Failed to load markets for {exchange.id}. Attempt {retries}/{max_retries}. Error: {str(e)}")
-            await asyncio.sleep(retry_delay)
+            return func(*args, **kwargs)
         except Exception as e:
-            logging.error(f"Unexpected error for {exchange.id}: {str(e)}")
-            break
-    logging.error(f"Failed to load markets for {exchange.id} after {max_retries} attempts.")
+            logging.error(f"Error in {func.__name__}: {str(e)}. Retrying {retries + 1}/{max_retries}...")
+            time.sleep(delay)
+            retries += 1
+    logging.error(f"Max retries exceeded for {func.__name__}")
     return None
 
-# Optimisation de la fonction fetch_specific_tickers_with_reconnect
-async def fetch_specific_tickers_with_reconnect(exchange, symbols, retry_delay=10, max_retries=5):
-    retries = 0
-    while retries < max_retries:
-        try:
-            tickers = {}
-            for symbol in symbols:
-                ticker = await exchange.fetch_ticker(symbol)
-                tickers[symbol] = ticker
-            return tickers
-        except (ccxt_errors.NetworkError, ccxt_errors.RequestTimeout) as e:
-            retries += 1
-            logging.error(f"Failed to fetch tickers for {exchange.id}. Attempt {retries}/{max_retries}. Error: {str(e)}")
-            await asyncio.sleep(retry_delay)
-        except Exception as e:
-            logging.error(f"Unexpected error for {exchange.id}: {str(e)}")
-            break
-    logging.error(f"Failed to fetch tickers for {exchange.id} after {max_retries} attempts.")
-    return None
-
-# Defining function for the telegram Bot, the first is sending message, the second is to stop the script with by sending a message to the bot
-async def send_message(bot_token, chat_id, text):
-    bot = Bot(bot_token)
-    bot.send_message(chat_id=chat_id, text=text)
-
-def stop_command(update: Update, context: CallbackContext):
-    global running
-    running = False
-    update.message.reply_text('Stopping script')
-
-# Function for executing trades
-async def execute_trade(exchange, first_symbol, second_symbol, third_symbol, tickers, initial_amount, fee, first_tick_size, second_tick_size, third_tick_size):
-    # Use adjusted trades (including fee)
-    first_price = Decimal(tickers[first_symbol]['ask'])
-    first_trade = (initial_amount / first_price) * (1 - Decimal(fee))
-    first_trade = first_trade.quantize(Decimal(str(first_tick_size)), rounding=ROUND_DOWN)
-
-    # Place first order
-    print(f'\nPlacing first order: {first_trade} {first_symbol}')
-    order = await exchange.create_order(first_symbol, 'market', 'buy', float(first_trade))
-    order_id = order['id']
-
-    # Wait for first order to be filled
-    while True:
-        order = await exchange.fetch_order(order_id, first_symbol)
-        if order['status'] == 'closed':
-            break
-        await asyncio.sleep(1)
-
-    # Retrieve actual amount of first trading pair bought
-    first_trade = Decimal(order['filled'])
-
-    # Use the entire amount of first trade for the second order
-    second_trade = first_trade
-
-    # Place second order
-    print(f'Placing second order: {second_trade} {second_symbol}')
-    order = await exchange.create_order(second_symbol, 'market', 'sell', float(second_trade))
-    order_id = order['id']
-
-    # Wait for second order to be filled
-    while True:
-        order = await exchange.fetch_order(order_id, second_symbol)
-        if order['status'] == 'closed':
-            break
-        await asyncio.sleep(1)
-
-    # Retrieve actual cost of second trading pair
-    second_trade = Decimal(order['cost'])
-
-    # Use the entire cost of second trade for the third order
-    third_trade = second_trade * (1 - Decimal(fee))
-
-    # Place third order
-    print(f'Placing third order: {third_trade} {third_symbol}')
-    order = await exchange.create_order(third_symbol, 'market', 'sell', float(third_trade))
-    order_id = order['id']
-
-    while True:
-        order = await exchange.fetch_order(order_id, third_symbol)
-        if order['status'] == 'closed':
-            break
-        await asyncio.sleep(1)
-    
-    # Fetch final balance
-    balance = await exchange.fetch_balance()
-    final_amount = balance['free']['USDC']
-
-    # Calculate profit/loss
-    profit = final_amount - initial_amount
-
-    print(f'Trade completed: Initial amount: {initial_amount}, Final amount: {final_amount}, Profit: {profit}')
-    
-    # Send Telegram message after trade completion
-    await send_message(bot_token, chat_id, f'Trade completed on {exchange.id}: Initial amount: {initial_amount}, Final amount: {final_amount}, Profit: {profit} USDC')
-
-    # return profit and final amount if needed for further calculations or logging
-    return profit, final_amount
-
-
-# Function for calculating the price impact of the order based on the orderbook asks, bids, and volumes
-async def calculate_price_impact(exchange, symbols, order_sizes, sides):
-    logging.info(f'Calculating price impact ')
-    
-    # Fetch order books concurrently
-    order_books = await asyncio.gather(*[exchange.fetch_order_book(symbol) for symbol in symbols])
-    logging.info(f'Order books fetched on {exchange}')
-    price_impacts = []
-
-    for i in range(len(symbols)):
-        symbol = symbols[i]
-        side = sides[i]
-        order_size = float(order_sizes[i])
-        order_book = order_books[i]
-        
-        # If we're buying, we need to look at the asks. If we're selling, we need to look at the bids.
-        orders = np.array(order_book['asks']) if side == 'buy' else np.array(order_book['bids'])
-
-        # Slice orders into prices and volumes
-        prices, volumes = orders[:,0], orders[:,1]
-
-        logging.info(f'Processing order book for {symbol} with side {side} and order size {order_size}')
-        logging.info(f'Order book prices: {prices}')
-        logging.info(f'Order book volumes: {volumes}')
-
-        total_value = 0
-        total_volume = 0
-
-        for j in range(len(prices)):
-            if order_size > 0:
-                volume_for_this_order = min(volumes[j], order_size)
-                value_for_this_order = volume_for_this_order * prices[j]
-
-                logging.info(f'At price level {prices[j]}: volume_for_this_order={volume_for_this_order}, value_for_this_order={value_for_this_order}')
-
-                total_value += value_for_this_order
-                total_volume += volume_for_this_order
-                order_size -= volume_for_this_order
-
-        if order_size <= 0:
-            # Calculate price impact
-            price_impact = total_value / total_volume if total_volume != 0 else None
-            logging.info(f'Price impact for {symbol}: {price_impact}')
-            price_impacts.append(price_impact)
+# Récupération des frais via l'API CCXT
+def get_trading_fees(exchange, pair):
+    try:
+        # Récupérer les frais de trading pour la paire spécifiée
+        fees = exchange.fetch_trading_fees()
+        if pair in fees:
+            return fees[pair]
         else:
-            # If order size was not completely filled, price impact can't be calculated
-            price_impacts.append(None)
-    
-    return price_impacts
-
-async def find_triangular_arbitrage_opportunities(exchange, markets, tickers, exchange_name, fee, initial_amount ):    
-    logging.info('Finding arbitrage opportunities.')
-    # Read existing trades from CSV file
-    csv_file = 'tri_arb_opportunities.csv'
-    
-    if os.path.exists(csv_file) and os.path.getsize(csv_file) > 0:
-        df = pd.read_csv(csv_file)
-        tri_arb_opportunities = df.to_dict('records')
-    else:
-        tri_arb_opportunities = []
-    
-    # Add a new variable to keep track of the last time a trade was added to the CSV file for each trading pair
-    last_trade_time = {}
-    
-    # Filter to only consider the specific pairs BTC/USDC, ETH/USDC, BTC/ETH
-    allowed_pairs = ['BTC/USDC', 'ETH/USDC', 'BTC/ETH']
-    
-    # Load markets data
-    tickers = await exchange.fetch_tickers()
-
-    for first_symbol in allowed_pairs:
-        # Check if first symbol is available in the exchange tickers
-        if first_symbol not in tickers or tickers[first_symbol].get('ask') is None or tickers[first_symbol].get('bid') is None:
-            continue
-        
-        first_price = Decimal(tickers[first_symbol]['ask'])
-        base, quote = first_symbol.split('/')
-        
-        # Define the second and third symbols depending on the first pair
-        if first_symbol == 'BTC/USDC':
-            second_symbol = 'BTC/ETH'
-            third_symbol = 'ETH/USDC'
-        elif first_symbol == 'ETH/USDC':
-            second_symbol = 'ETH/BTC'
-            third_symbol = 'BTC/USDC'
-        elif first_symbol == 'BTC/ETH':
-            second_symbol = 'BTC/USDC'
-            third_symbol = 'ETH/USDC'
-        else:
-            continue
-        
-        # Verify the second and third symbols exist in the tickers and have valid ask/bid prices
-        if all(symbol in tickers and tickers[symbol].get('ask') is not None and tickers[symbol].get('bid') is not None for symbol in [second_symbol, third_symbol]):
-            second_price = Decimal(tickers[second_symbol]['bid'])
-            third_price = Decimal(tickers[third_symbol]['bid'])
-        else:
-            continue
-        
-        # Calculate trades
-        first_trade = initial_amount / first_price
-        second_trade = first_trade * second_price
-        third_trade = second_trade * third_price
-
-        # Quantize the trades (for precision)
-        first_trade = first_trade.quantize(Decimal('0.00000001'), rounding=ROUND_DOWN)
-        second_trade = second_trade.quantize(Decimal('0.00000001'), rounding=ROUND_DOWN)
-        third_trade = third_trade.quantize(Decimal('0.00000001'), rounding=ROUND_DOWN)
-
-        # Calculate profit
-        profit = third_trade - initial_amount
-        profit_percentage = (profit / initial_amount) * 100
-        
-        if profit_percentage > 0.1:  # Threshold for minimal profit to trigger the opportunity
-            logging.info(f'Arbitrage opportunity found on {exchange_name}: {first_symbol} -> {second_symbol} -> {third_symbol}. Profit: {profit_percentage:.2f}%')
-
-            # Add opportunity to the list
-            opportunities = {
-                'first_symbol': first_symbol,
-                'second_symbol': second_symbol,
-                'third_symbol': third_symbol,
-                'profit_percentage': profit_percentage,
-                'profit': profit,
-                'first_trade': first_trade,
-                'second_trade': second_trade,
-                'third_trade': third_trade,
+            # Si la paire n'a pas de frais spécifiques, retourner les frais généraux par défaut
+            logging.warning(f"Fees for {pair} not found, using default fees for {exchange.id}")
+            return {
+                'maker': Decimal(fees.get('maker', 0.001)),  # Par défaut 0.1% maker
+                'taker': Decimal(fees.get('taker', 0.001))   # Par défaut 0.1% taker
             }
-
-            # Log opportunity and trigger trade execution if required
-            await send_message(bot_token, chat_id, f'Arbitrage opportunity on {exchange_name}: {first_symbol} -> {second_symbol} -> {third_symbol}. Profit: {profit:.2f} USDC')
-
-            # Sort opportunities by profit percentage in descending order (optional)
-            tri_arb_opportunities.append(opportunities)
-
-    # Après avoir écrit les opportunités dans le fichier CSV, vider la liste pour économiser la mémoire
-    df = pd.DataFrame(tri_arb_opportunities)
-    df.to_csv(csv_file, index=False)
-
-    # Nettoyer la liste pour libérer la mémoire
-    tri_arb_opportunities.clear()  # Nettoyer la mémoire des opportunités
-    gc.collect()  # Forcer le garbage collector
-
-async def main():
-    # Montant initial par défaut en USDC (exemple : 10 USDC)
-    initial_amount = Decimal('10')
-    
-    # Configuration du bot Telegram
-    updater = Updater(bot_token)
-    dispatcher = updater.dispatcher
-    dispatcher.add_handler(MessageHandler(Filters.regex('^/stop$'), stop_command))
-    updater.start_polling()
-    
-    # Envoyer un message à Telegram pour indiquer que le bot démarre
-    await send_message(bot_token, chat_id, "Recherche d'opportunités...")
-    
-    global running
-    running = True
-    
-    # Limiter les paires de trading aux 3 paires spécifiques
-    allowed_pairs = ['BTC/USDC', 'ETH/USDC', 'BTC/ETH']
-    
-    print('\nFinding arbitrage opportunities...')
-    
-    iteration_count = 1  # Initialiser le compteur d'itérations
-    
-    while running:
-        try:
-            # Utilisation de la fonction de reconnexion pour charger les marchés et les tickers
-            log_memory_usage("Before loading binance markets")
-            binance_markets = await load_markets_with_reconnect(binance)
-            log_memory_usage("After loading binance markets")
-            
-            log_memory_usage("Before loading kucoin markets")
-            kucoin_markets = await load_markets_with_reconnect(kucoin)
-            log_memory_usage("After loading kucoin markets")
-            
-            log_memory_usage("Before loading kraken markets")
-            kraken_markets = await load_markets_with_reconnect(kraken)
-            log_memory_usage("After loading kraken markets")
-
-            log_memory_usage("Before tickers binance markets")
-            binance_tickers = await fetch_specific_tickers_with_reconnect(binance, allowed_pairs)
-            log_memory_usage("After tickers binance markets")
-            
-            log_memory_usage("Before tickers kucoin markets")
-            kucoin_tickers = await fetch_specific_tickers_with_reconnect(kucoin, allowed_pairs)
-            log_memory_usage("After tickers kucoin markets")
-            
-            log_memory_usage("Before tickers kraken markets")
-            kraken_tickers = await fetch_specific_tickers_with_reconnect(kraken, allowed_pairs)
-            log_memory_usage("After tickers kraken markets")
-
-            if binance_markets and kucoin_markets and kraken_markets:
-                # Définir les frais pour chaque plateforme
-                binance_fee = 0.00075
-                kucoin_fee = 0.001
-                kraken_fee = 0.0016           
-
-                # Rechercher des opportunités d'arbitrage en parallèle sur toutes les plateformes
-                await asyncio.gather(
-                    find_triangular_arbitrage_opportunities(binance, binance_markets, binance_tickers, 'Binance', binance_fee, initial_amount),
-                    find_triangular_arbitrage_opportunities(kucoin, kucoin_markets, kucoin_tickers, 'Kucoin', kucoin_fee, initial_amount),
-                    find_triangular_arbitrage_opportunities(kraken, kraken_markets, kraken_tickers, 'Kraken', kraken_fee, initial_amount)
-                )
-
-            # Libérer explicitement la mémoire après chaque cycle d'appels API
-            binance_tickers.clear()
-            kucoin_tickers.clear()
-            kraken_tickers.clear()
-            
-            gc.collect()  # Force garbage collection
-            log_memory_usage("After garbage collection")
-
-            # Afficher le temps écoulé et le nombre d'itérations
-            end_time = time.time()
-            elapsed_time = end_time - start_time
-            print(f'\n\rElapsed time: {elapsed_time:.2f} seconds | Number of iterations: {iteration_count}', end='\r')
-
-            iteration_count += 1  # Incrémenter le compteur d'itérations
-            
-            await asyncio.sleep(30)  # Pause de 30 secondes avant la prochaine itération
+    except Exception as e:
+        logging.error(f"Error fetching trading fees for {pair} on {exchange.id}: {str(e)}")
+        # Retourner les frais par défaut en cas d'erreur
+        return {
+            'maker': Decimal('0.001'),  # Frais par défaut 0.1% maker
+            'taker': Decimal('0.001')   # Frais par défaut 0.1% taker
+        }
         
+# Fonction d'attente de remplissage d'ordre avec timeout
+def wait_for_order(exchange, order_id, pair, timeout=30):
+    start_time = datetime.datetime.now()
+    while True:
+        order_status = retry_request(exchange.fetch_order, order_id, pair)
+        if order_status:
+            status = order_status['status']
+            # Gérer les statuts possibles de l'ordre
+            if status in ['closed', 'filled', 'partially_closed', 'partially_filled']:
+                return order_status
+            elif status in ['canceled', 'rejected']:
+                logging.error(f"Order {order_id} on {pair} was {status}.")
+                send_telegram_message(f"Order {order_id} on {pair} was {status}.")
+                return None
+        # Vérifier si le timeout est atteint
+        if (datetime.datetime.now() - start_time).seconds > timeout:
+            logging.error(f"Order {order_id} on {pair} not filled within {timeout} seconds.")
+            send_telegram_message(f"Order {order_id} on {pair} not filled within {timeout} seconds.")
+            return None
+        time.sleep(1)
+
+# Fonction pour rechercher des opportunités d'arbitrage triangulaire
+def triangular_arbitrage(exchange, pair1, pair2, pair3):
+    try:
+        # Montant à investir pour le premier ordre (ici, 10 USDC)
+        amount_to_invest = Decimal('10')  # Utiliser Decimal pour précision
+        
+        # Récupérer les prix actuels pour les trois paires
+        ticker1 = exchange.fetch_ticker(pair1)
+        ticker2 = exchange.fetch_ticker(pair2)
+        ticker3 = exchange.fetch_ticker(pair3)
+
+        if ticker1 is None or ticker2 is None or ticker3 is None:
+            return
+
+        # Calculer les prix de conversion
+        price1 = Decimal(str(ticker1['ask']))  # Prix d'achat BTC/USDC
+        price2 = Decimal(str(ticker2['ask']))  # Prix d'achat ETH/USDC
+        price3 = Decimal(str(ticker3['bid']))  # Prix de vente BTC/ETH
+        
+        # Vérifier si le volume est suffisant pour chaque paire avant d'exécuter l'arbitrage
+        if ticker1['quoteVolume'] < float(amount_to_invest) or ticker2['quoteVolume'] < float(amount_to_invest) or ticker3['quoteVolume'] < float(amount_to_invest):
+            logging.info(f"Insufficient volume for arbitrage: {pair1}, {pair2}, {pair3}")
+            return  # Si le volume est insuffisant, arrêter ici     
+        
+        # Récupérer les frais spécifiques pour chaque paire
+        fees_pair1 = get_trading_fees(exchange, pair1)
+        fees_pair2 = get_trading_fees(exchange, pair2)
+        fees_pair3 = get_trading_fees(exchange, pair3)
+        
+        fee1 = Decimal(fees_pair1['taker']) if fees_pair1 else Decimal('0.001')  # Frais pour l'ordre d'achat
+        fee2 = Decimal(fees_pair2['taker']) if fees_pair2 else Decimal('0.001')  # Frais pour l'ordre d'achat
+        fee3 = Decimal(fees_pair3['taker']) if fees_pair3 else Decimal('0.001')  # Frais pour l'ordre d'achat
+        
+        # Calcul de l'opportunité d'arbitrage
+        arbitrage_profit = (price1 * price2 * price3).quantize(Decimal('0.00000001'), rounding=ROUND_DOWN)
+        
+        if arbitrage_profit > Decimal(1):
+            logging.info(f"Arbitrage Opportunity Found: {pair1} -> {pair2} -> {pair3} with profit {arbitrage_profit}")
+            send_telegram_message(f"Arbitrage Opportunity: {pair1} -> {pair2} -> {pair3} | Profit: {arbitrage_profit}")
+            
+            # Simuler ou exécuter l'ordre avec 10 USDC
+            execute_trade(exchange, pair1, pair2, pair3, amount_to_invest, tick_size1=0.000001, tick_size2=0.000001, tick_size3=0.000001)
+        else:
+            logging.info(f"No arbitrage opportunity for {pair1} -> {pair2} -> {pair3}")
+    except Exception as e:
+        logging.error(f"Error in triangular_arbitrage: {str(e)}")
+        send_telegram_message(f"Error in triangular_arbitrage: {str(e)}")
+
+# Fonction pour exécuter le trade en tenant compte des frais et des tailles de ticks
+def execute_trade(exchange, pair1, pair2, pair3, amount_to_invest, tick_size1, tick_size2, tick_size3):
+    try:
+        # Étape 1: Récupérer les frais pour chaque paire
+        fees_pair1 = get_trading_fees(exchange, pair1)
+        fees_pair2 = get_trading_fees(exchange, pair2)
+        fees_pair3 = get_trading_fees(exchange, pair3)
+        
+        # Assumer que les frais taker sont appliqués (dans le cas d'un ordre au marché)
+        fee1 = fees_pair1['taker'] if fees_pair1 else 0.001  # Appliquer un frais par défaut si non récupérable
+        fee2 = fees_pair2['taker'] if fees_pair2 else 0.001
+        fee3 = fees_pair3['taker'] if fees_pair3 else 0.001
+
+        # Étape 2: Calculer la quantité à acheter pour la première paire, ajustée par les frais
+        ticker1 = exchange.fetch_ticker(pair1)
+        price1 = ticker1['ask']  # Prix d'achat
+        amount_base_currency = (amount_to_invest / price1) * (1 - Decimal(fee1))
+        amount_base_currency = amount_base_currency.quantize(Decimal(str(tick_size1)), rounding=ROUND_DOWN)
+
+        # Passer le premier ordre (achat)
+        logging.info(f'Placing first order: {amount_base_currency} {pair1}')
+        order1 = exchange.create_order(pair1, 'market', 'buy', float(amount_base_currency))
+        order_id1 = order1['id']
+        
+        # Vérifier que l'ordre est rempli
+        while True:
+            order_status = exchange.fetch_order(order_id1, pair1)
+            if order_status['status'] == 'closed':
+                amount_base_currency = Decimal(order_status['filled'])
+                break
+            time.sleep(1)
+
+        # Étape 3: Calculer la quantité pour la deuxième paire
+        ticker2 = exchange.fetch_ticker(pair2)
+        price2 = ticker2['bid']
+        amount_second_currency = amount_base_currency * price2 * (1 - Decimal(fee2))
+        amount_second_currency = amount_second_currency.quantize(Decimal(str(tick_size2)), rounding=ROUND_DOWN)
+
+        # Passer le deuxième ordre (vente)
+        logging.info(f'Placing second order: {amount_second_currency} {pair2}')
+        order2 = exchange.create_order(pair2, 'market', 'sell', float(amount_second_currency))
+        order_id2 = order2['id']
+        
+        # Vérifier que l'ordre est rempli
+        while True:
+            order_status = exchange.fetch_order(order_id2, pair2)
+            if order_status['status'] == 'closed':
+                amount_second_currency = Decimal(order_status['cost'])
+                break
+            time.sleep(1)
+
+        # Étape 4: Calculer la quantité pour la troisième paire
+        ticker3 = exchange.fetch_ticker(pair3)
+        price3 = ticker3['bid']
+        amount_third_currency = amount_second_currency * price3 * (1 - Decimal(fee3))
+        amount_third_currency = amount_third_currency.quantize(Decimal(str(tick_size3)), rounding=ROUND_DOWN)
+
+        # Passer le troisième ordre (vente)
+        logging.info(f'Placing third order: {amount_third_currency} {pair3}')
+        order3 = exchange.create_order(pair3, 'market', 'sell', float(amount_third_currency))
+        order_id3 = order3['id']
+
+        # Vérifier que l'ordre est rempli
+        while True:
+            order_status = exchange.fetch_order(order_id3, pair3)
+            if order_status['status'] == 'closed':
+                logging.info(f'Triangular arbitrage completed: {pair1} -> {pair2} -> {pair3}')
+                break
+            time.sleep(1)
+
+        # Message Telegram avec les détails de l'arbitrage terminé et les profits
+        arbitrage_profit = (price1 * price2 * price3).quantize(Decimal('0.00000001'), rounding=ROUND_DOWN)  # Recalcule ou récupère le profit si nécessaire
+        send_telegram_message(f"Executed triangular trade: {pair1}, {pair2}, {pair3} with {amount_to_invest} USDC and profit: {arbitrage_profit}")
+        
+        logging.info(f"Executed triangular trade: {pair1}, {pair2}, {pair3} with {amount_to_invest} USDC")
+        
+        logging.info(f"Fees for {pair1}: Maker: {fees_pair1['maker']}, Taker: {fees_pair1['taker']}")
+        logging.info(f"Fees for {pair2}: Maker: {fees_pair2['maker']}, Taker: {fees_pair2['taker']}")
+        logging.info(f"Fees for {pair3}: Maker: {fees_pair3['maker']}, Taker: {fees_pair3['taker']}")
+    
+    except Exception as e:
+        logging.error(f"Error executing trade: {str(e)}")
+        send_telegram_message(f"Error executing trade: {str(e)}")
+
+# Liste des paires à surveiller pour l'arbitrage triangulaire
+pairs_to_watch = [
+    ('BTC/USDC', 'ETH/USDC', 'BTC/ETH'),  # Exemple de trio
+]
+
+# Fonction pour surveiller les opportunités d'arbitrage triangulaire
+def monitor_arbitrage_opportunities():
+    while True:
+        try:
+            for pair1, pair2, pair3 in pairs_to_watch:
+                # Vérifier si chaque exchange est connecté avant d'exécuter l'arbitrage
+                if binance is not None:
+                    try:
+                        triangular_arbitrage(binance, pair1, pair2, pair3)
+                    except Exception as e:
+                        logging.error(f"Error in triangular_arbitrage for Binance: {str(e)}")
+                
+                if kucoin is not None:
+                    try:
+                        triangular_arbitrage(kucoin, pair1, pair2, pair3)
+                    except Exception as e:
+                        logging.error(f"Error in triangular_arbitrage for KuCoin: {str(e)}")
+                
+                if kraken is not None:
+                    try:
+                        triangular_arbitrage(kraken, pair1, pair2, pair3)
+                    except Exception as e:
+                        logging.error(f"Error in triangular_arbitrage for Kraken: {str(e)}")
+            
+            time.sleep(10)  # Pause de 10 secondes entre chaque vérification
         except Exception as e:
-            logging.error(f"An error occurred: {str(e)}")
-            traceback.print_exc()
-            await send_message(bot_token, chat_id, f"Le bot a rencontré une erreur: {str(e)}")
-    
-    # Capturer un snapshot final de la mémoire après l'exécution
-    snapshot_final = tracemalloc.take_snapshot()
-    print("Snapshot final de la mémoire après l'exécution")
-    display_top(snapshot_final)
+            logging.error(f"Error in monitor_arbitrage_opportunities: {str(e)}")
+            send_telegram_message(f"Error in monitor_arbitrage_opportunities: {str(e)}")
+            time.sleep(60)  # Attendre 60 secondes avant de réessayer en cas d'erreur
 
-    # Arrêter le bot Telegram quand le script est arrêté
-    updater.stop()
-    
-    # Libérer les ressources utilisées par les plateformes d'échange
-    await binance.close()
-    await kucoin.close()
-    await kraken.close()
-
-if __name__ == "__main__":
-    # Capture initiale de la mémoire
-    snapshot_initial = tracemalloc.take_snapshot()
-    print("Snapshot initial de la mémoire au démarrage")
-    display_top(snapshot_initial)
-
-    asyncio.run(main())
+# Lancer la surveillance des opportunités d'arbitrage
+monitor_arbitrage_opportunities()
