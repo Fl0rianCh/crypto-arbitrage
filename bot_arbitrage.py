@@ -143,12 +143,12 @@ def wait_for_order(exchange, order_id, pair, timeout=30):
 # Fonction pour vérifier si le volume disponible est suffisant dans le carnet d'ordres
 def check_orderbook_for_sufficient_volume(orderbook, amount_required, price_level=0):
     volume_available = Decimal('0')
-    for level in orderbook['asks']:  # Tu peux aussi vérifier les bids si nécessaire
+    for level in orderbook['asks']:  # Tu peux aussi vérifier les 'bids' si nécessaire
         volume_available += Decimal(level[1])
         if volume_available >= amount_required:
             return True
     return False
-
+    
 # Fonction pour rechercher des opportunités d'arbitrage triangulaire
 def triangular_arbitrage(exchange, pair1, pair2, pair3):
     try:
@@ -175,6 +175,11 @@ def triangular_arbitrage(exchange, pair1, pair2, pair3):
         orderbook1 = exchange.fetch_order_book(pair1)
         orderbook2 = exchange.fetch_order_book(pair2)
         orderbook3 = exchange.fetch_order_book(pair3)
+
+        # Log détaillé des volumes disponibles
+        logging.info(f"Orderbook BTC/USDC: {orderbook1['asks'][0][1]} units at price {orderbook1['asks'][0][0]}")
+        logging.info(f"Orderbook ETH/USDC: {orderbook2['bids'][0][1]} units at price {orderbook2['bids'][0][0]}")
+        logging.info(f"Orderbook LTC/BTC: {orderbook3['bids'][0][1]} units at price {orderbook3['bids'][0][0]}")
 
         # Appeler la fonction pour vérifier le volume
         if not check_orderbook_for_sufficient_volume(orderbook1, amount_to_invest / price1) or \
