@@ -4,6 +4,8 @@ import logging
 from decimal import Decimal, ROUND_DOWN
 from telegram import Bot
 import datetime
+import logging
+from logging.handlers import TimedRotatingFileHandler
 
 # Configuration des clés API directement dans le script
 BINANCE_API_KEY = 'job6FqJN3HZ0ekXO7uZ245FwCwbLbFIrz0Zrlq4pflUgXoCPw0ehmscdzNv0PGIA'
@@ -26,8 +28,16 @@ def send_telegram_message(message):
     except Exception as e:
         logging.error(f"Error sending Telegram message: {str(e)}")
 
-# Configuration de la journalisation
-logging.basicConfig(filename='arbitrage.log', level=logging.INFO, format='%(asctime)s %(message)s')
+# Configuration de la journalisation avec rotation des logs
+log_file = "arbitrage.log"
+handler = TimedRotatingFileHandler(log_file, when="midnight", interval=1, backupCount=1)
+handler.setFormatter(logging.Formatter('%(asctime)s %(message)s'))
+handler.suffix = "%Y-%m-%d"  # Ajouter la date dans le nom du fichier log
+
+logging.basicConfig(level=logging.INFO, handlers=[handler])
+
+# Exemple de message dans les logs
+logging.info("Logging system initialized with daily rotation")
 
 # Frais par plateforme (éditables)
 fees = {
@@ -146,6 +156,9 @@ def triangular_arbitrage(exchange, pair1, pair2, pair3):
         price1 = Decimal(str(ticker1['ask']))  # Prix d'achat BTC/USDC
         price2 = Decimal(str(ticker2['ask']))  # Prix d'achat ETH/USDC
         price3 = Decimal(str(ticker3['bid']))  # Prix de vente BTC/ETH
+        
+        # Logguer chaque analyse du marché
+        logging.info(f"Market Analysis: {pair1} price1: {price1}, {pair2} price2: {price2}, {pair3} price3: {price3}")
         
         # Vérifier si le volume est suffisant pour chaque paire avant d'exécuter l'arbitrage
         if ticker1['quoteVolume'] < float(amount_to_invest) or ticker2['quoteVolume'] < float(amount_to_invest) or ticker3['quoteVolume'] < float(amount_to_invest):
