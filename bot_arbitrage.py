@@ -19,6 +19,13 @@ TELEGRAM_TOKEN = '7501427979:AAE-r03vaNZjuATvSL5FUdAHqn2BjwV0Gok'
 TELEGRAM_CHAT_ID = '1887133385'
 bot = Bot(token=TELEGRAM_TOKEN)
 
+# Fonction d'envoi de notifications sur Telegram
+def send_telegram_message(message):
+    try:
+        bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
+    except Exception as e:
+        logging.error(f"Error sending Telegram message: {str(e)}")
+
 # Configuration de la journalisation
 logging.basicConfig(filename='arbitrage.log', level=logging.INFO, format='%(asctime)s %(message)s')
 
@@ -65,13 +72,6 @@ def connect_to_exchanges():
         return None, None, None
 
 binance, kucoin, kraken = connect_to_exchanges()
-
-# Fonction d'envoi de notifications sur Telegram
-def send_telegram_message(message):
-    try:
-        bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
-    except Exception as e:
-        logging.error(f"Error sending Telegram message: {str(e)}")
         
 def retry_request(func, *args, max_retries=5, delay=2, **kwargs):
     retries = 0
