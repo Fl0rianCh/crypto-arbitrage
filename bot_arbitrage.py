@@ -149,13 +149,6 @@ def check_orderbook_for_sufficient_volume(orderbook, amount_required, price_leve
             return True
     return False
 
-# Appliquer cette vérification dans la fonction d'arbitrage
-if not check_orderbook_for_sufficient_volume(orderbook1, amount_to_invest / price1) or \
-   not check_orderbook_for_sufficient_volume(orderbook2, amount_to_invest * price2) or \
-   not check_orderbook_for_sufficient_volume(orderbook3, amount_to_invest * price3):
-    logging.info(f"Insufficient volume for arbitrage: {pair1}, {pair2}, {pair3}")
-    return
-    
 # Fonction pour rechercher des opportunités d'arbitrage triangulaire
 def triangular_arbitrage(exchange, pair1, pair2, pair3):
     try:
