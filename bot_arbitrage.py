@@ -98,25 +98,27 @@ def retry_request(func, *args, max_retries=5, delay=2, **kwargs):
 # Récupération des frais via l'API CCXT
 def get_trading_fees(exchange, pair):
     try:
-        # Récupérer les frais de trading pour la paire spécifiée
-        fees = exchange.fetch_trading_fees()
-        if pair in fees:
-            return fees[pair]
+        if exchange.id == 'kucoin':
+            # Définir des frais par défaut pour KuCoin, car fetchTradingFees() n'est pas supporté
+            return {'maker': Decimal('0.001'), 'taker': Decimal('0.001')}  # 0.1% maker/taker par défaut
         else:
-            # Si la paire n'a pas de frais spécifiques, retourner les frais généraux par défaut
-            logging.warning(f"Fees for {pair} not found, using default fees for {exchange.id}")
-            return {
-                'maker': Decimal(fees.get('maker', 0.001)),  # Par défaut 0.1% maker
-                'taker': Decimal(fees.get('taker', 0.001))   # Par défaut 0.1% taker
-            }
+            fees = exchange.fetch_trading_fees()
+            if pair in fees:
+                return fees[pair]
+            else:
+                logging.warning(f"Fees for {pair} not found, using default fees for {exchange.id}")
+                return {
+                    'maker': Decimal(fees.get('maker', 0.001)),
+                    'taker': Decimal(fees.get('taker', 0.001))
+                }
     except Exception as e:
         logging.error(f"Error fetching trading fees for {pair} on {exchange.id}: {str(e)}")
-        # Retourner les frais par défaut en cas d'erreur
+        # Retourner des frais par défaut en cas d'erreur
         return {
             'maker': Decimal('0.001'),  # Frais par défaut 0.1% maker
             'taker': Decimal('0.001')   # Frais par défaut 0.1% taker
         }
-        
+       
 # Fonction d'attente de remplissage d'ordre avec timeout
 def wait_for_order(exchange, order_id, pair, timeout=30):
     start_time = datetime.datetime.now()
@@ -155,7 +157,7 @@ def triangular_arbitrage(exchange, pair1, pair2, pair3):
         # Calculer les prix de conversion
         price1 = Decimal(str(ticker1['ask']))  # Prix d'achat BTC/USDC
         price2 = Decimal(str(ticker2['ask']))  # Prix d'achat ETH/USDC
-        price3 = Decimal(str(ticker3['bid']))  # Prix de vente LTC/USDC
+        price3 = Decimal(str(ticker3['bid']))  # Prix de vente LTC/BTC
         
         # Logguer chaque analyse du marché
         logging.info(f"Market Analysis: {pair1} price1: {price1}, {pair2} price2: {price2}, {pair3} price3: {price3}")
@@ -205,7 +207,7 @@ def execute_trade(exchange, pair1, pair2, pair3, amount_to_invest, tick_size1, t
         # Étape 2: Calculer la quantité à acheter pour la première paire, ajustée par les frais
         ticker1 = exchange.fetch_ticker(pair1)
         price1 = ticker1['ask']  # Prix d'achat
-        amount_base_currency = (amount_to_invest / price1) * (1 - Decimal(fee1))
+        amount_base_currency = (Decimal(amount_to_invest) / Decimal(price1)) * (1 - Decimal(fee1))
         amount_base_currency = amount_base_currency.quantize(Decimal(str(tick_size1)), rounding=ROUND_DOWN)
 
         # Passer le premier ordre (achat)
@@ -275,7 +277,7 @@ def execute_trade(exchange, pair1, pair2, pair3, amount_to_invest, tick_size1, t
 
 # Liste des paires à surveiller pour l'arbitrage triangulaire
 pairs_to_watch = [
-    ('BTC/USDC', 'ETH/USDC', 'LTC/USDC'),  # Exemple de trio
+    ('BTC/USDC', 'ETH/USDC', 'LTC/BTC'),  # Exemple de trio
 ]
 
 # Fonction pour surveiller les opportunités d'arbitrage triangulaire
