@@ -155,15 +155,15 @@ def triangular_arbitrage(exchange, pair1, pair2, pair3):
             return
 
         # Calculer les prix de conversion
-        price1 = Decimal(str(ticker1['ask']))  # Prix d'achat BTC/USDC
-        price2 = Decimal(str(ticker2['ask']))  # Prix d'achat ETH/USDC
-        price3 = Decimal(str(ticker3['bid']))  # Prix de vente LTC/BTC
+        price1 = Decimal(ticker1['ask'])  # Prix d'achat BTC/USDC
+        price2 = Decimal(ticker2['ask'])  # Prix d'achat ETH/USDC        
+        price3 = Decimal(ticker3['bid'])  # Prix de vente LTC/BTC
         
         # Logguer chaque analyse du marché
         logging.info(f"Market Analysis: {pair1} price1: {price1}, {pair2} price2: {price2}, {pair3} price3: {price3}")
         
         # Vérifier si le volume est suffisant pour chaque paire avant d'exécuter l'arbitrage
-        if ticker1['quoteVolume'] < float(amount_to_invest) or ticker2['quoteVolume'] < float(amount_to_invest) or ticker3['quoteVolume'] < float(amount_to_invest):
+        if Decimal(ticker1['quoteVolume']) < amount_to_invest or Decimal(ticker2['quoteVolume']) < amount_to_invest or Decimal(ticker3['quoteVolume']) < amount_to_invest:
             logging.info(f"Insufficient volume for arbitrage: {pair1}, {pair2}, {pair3}")
             return  # Si le volume est insuffisant, arrêter ici     
         
@@ -176,10 +176,19 @@ def triangular_arbitrage(exchange, pair1, pair2, pair3):
         fee2 = Decimal(fees_pair2['taker']) if fees_pair2 else Decimal('0.001')  # Frais pour l'ordre d'achat
         fee3 = Decimal(fees_pair3['taker']) if fees_pair3 else Decimal('0.001')  # Frais pour l'ordre d'achat
         
-        # Calcul de l'opportunité d'arbitrage
-        arbitrage_profit = (price1 * price2 * price3).quantize(Decimal('0.00000001'), rounding=ROUND_DOWN)
+        # Conversion initiale de 10 USDC en BTC
+        btc_amount = (amount_to_invest / price1) * (Decimal('1') - fee1)  # Prendre en compte les frais de la paire BTC/USDC
         
-        if arbitrage_profit > Decimal(1):
+        # Conversion de BTC en ETH
+        eth_amount = btc_amount * price2 * (Decimal('1') - fee2)  # Prendre en compte les frais de la paire ETH/USDC
+
+        # Conversion de ETH en LTC
+        ltc_amount = eth_amount * price3 * (Decimal('1') - fee3)  # Prendre en compte les frais de la paire LTC/BTC
+
+        # Calcul du profit : Comparer le montant final en LTC avec l'investissement initial en USDC
+        arbitrage_profit = (ltc_amount - amount_to_invest).quantize(Decimal('0.00000001'), rounding=ROUND_DOWN)
+       
+        if arbitrage_profit > Decimal(0):  # Vérifier que le profit est positif
             logging.info(f"Arbitrage Opportunity Found: {pair1} -> {pair2} -> {pair3} with profit {arbitrage_profit}")
             send_telegram_message(f"Arbitrage Opportunity: {pair1} -> {pair2} -> {pair3} | Profit: {arbitrage_profit}")
             
@@ -198,6 +207,7 @@ def execute_trade(exchange, pair1, pair2, pair3, amount_to_invest, tick_size1, t
         fees_pair1 = get_trading_fees(exchange, pair1)
         fees_pair2 = get_trading_fees(exchange, pair2)
         fees_pair3 = get_trading_fees(exchange, pair3)
+        fee1 = Decimal(fees_pair1['taker'])
         
         # Assumer que les frais taker sont appliqués (dans le cas d'un ordre au marché)
         fee1 = fees_pair1['taker'] if fees_pair1 else 0.001  # Appliquer un frais par défaut si non récupérable
@@ -206,8 +216,8 @@ def execute_trade(exchange, pair1, pair2, pair3, amount_to_invest, tick_size1, t
 
         # Étape 2: Calculer la quantité à acheter pour la première paire, ajustée par les frais
         ticker1 = exchange.fetch_ticker(pair1)
-        price1 = ticker1['ask']  # Prix d'achat
-        amount_base_currency = (Decimal(amount_to_invest) / Decimal(price1)) * (1 - Decimal(fee1))
+        price1 = Decimal(ticker1['ask'])
+        amount_base_currency = (Decimal(amount_to_invest) / Decimal(price1)) * (Decimal('1') - Decimal(fee1))
         amount_base_currency = amount_base_currency.quantize(Decimal(str(tick_size1)), rounding=ROUND_DOWN)
 
         # Passer le premier ordre (achat)
@@ -226,7 +236,7 @@ def execute_trade(exchange, pair1, pair2, pair3, amount_to_invest, tick_size1, t
         # Étape 3: Calculer la quantité pour la deuxième paire
         ticker2 = exchange.fetch_ticker(pair2)
         price2 = ticker2['bid']
-        amount_second_currency = amount_base_currency * price2 * (1 - Decimal(fee2))
+        amount_base_currency = (Decimal(amount_to_invest) / Decimal(price2)) * (Decimal('1') - Decimal(fee2))
         amount_second_currency = amount_second_currency.quantize(Decimal(str(tick_size2)), rounding=ROUND_DOWN)
 
         # Passer le deuxième ordre (vente)
@@ -245,7 +255,7 @@ def execute_trade(exchange, pair1, pair2, pair3, amount_to_invest, tick_size1, t
         # Étape 4: Calculer la quantité pour la troisième paire
         ticker3 = exchange.fetch_ticker(pair3)
         price3 = ticker3['bid']
-        amount_third_currency = amount_second_currency * price3 * (1 - Decimal(fee3))
+        amount_base_currency = (Decimal(amount_to_invest) / Decimal(price3)) * (Decimal('1') - Decimal(fee3))
         amount_third_currency = amount_third_currency.quantize(Decimal(str(tick_size3)), rounding=ROUND_DOWN)
 
         # Passer le troisième ordre (vente)
