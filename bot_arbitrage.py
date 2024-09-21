@@ -315,4 +315,4 @@ send_telegram_message("Ok lets go !")
 while True:
     if find_arbitrage_opportunity():
         execute_if_profitable()  # Simuler et n'exécuter que si rentable
-    time.sleep(2)  # Ajuster en fonction de la performance
+    time.sleep(1)  # Ajuster en fonction de la performance
