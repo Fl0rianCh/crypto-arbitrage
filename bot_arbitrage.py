@@ -16,9 +16,9 @@ TELEGRAM_CHAT_ID = '1887133385'
 bot = Bot(token=TELEGRAM_TOKEN)
 
 # Paramètres dynamiques
-initial_investment = Decimal('20')  # Montant investi
+initial_investment = Decimal('40')  # Montant investi
 transaction_brokerage = Decimal('0.075')  # Frais sur Binance 0.075%
-min_profit = min_profit = initial_investment * Decimal('0.01') # Profit minimum attendu en %
+min_profit = min_profit = initial_investment * Decimal('0.005') # Profit minimum attendu soit 0,5%
 
 # Montant minimum de profit pour déclencher l'arbitrage (par exemple 0,1% de profit)
 min_profit_threshold = Decimal('0.001')  # Seuil de profit minimum de 0,1%
