@@ -267,6 +267,9 @@ def execute_if_profitable():
     else:
         logging.error("Erreur dans la simulation des stratégies.")
 
+# Envoyer une notification Telegram pour indiquer le démarrage du bot
+send_telegram_message("Ok lets go !")
+
 # Boucle principale pour rechercher des opportunités d'arbitrage
 while True:
     if find_arbitrage_opportunity():
