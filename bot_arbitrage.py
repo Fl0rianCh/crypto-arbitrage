@@ -1,353 +1,274 @@
 import ccxt
 import time
 import logging
-from decimal import Decimal, ROUND_DOWN
+from decimal import Decimal
 from telegram import Bot
-import datetime
-import logging
 from logging.handlers import TimedRotatingFileHandler
+import math  # Import nécessaire pour la fonction check_if_float_zero
 
-# Configuration des clés API directement dans le script
+# Configuration des clés API Binance
 BINANCE_API_KEY = 'job6FqJN3HZ0ekXO7uZ245FwCwbLbFIrz0Zrlq4pflUgXoCPw0ehmscdzNv0PGIA'
 BINANCE_SECRET_KEY = 'pGUCIqZpKF25EBDZCokGFJbU6aI051wJEPjj0f3TkQWsiKiW2nEgN9nV7Op4D1Ns'
-KUCOIN_API_KEY = '66dffc92e72ff9000190a3ae'
-KUCOIN_SECRET_KEY = '786adb6d-03a4-464e-8ed3-15330dc48fc5'
-KUCOIN_PASSWORD = 'yD13A5fc18102023$'
-KRAKEN_API_KEY = '6P0Taom57ziQjWXRdiq5LZqTZMKRhF6aEMI/Mhz6OWmInmDuvk/eATUr'
-KRAKEN_SECRET_KEY = 'I+4fZL3GQmApUXivCLaQpmMFjQ6NIvwvjYACnO/vC9KRVrX0Fm2JNnHx93mu8xOas9YJHd3SNkuDkQYYQtF9XQ=='
 
 # Configuration de l'API Telegram pour les notifications
 TELEGRAM_TOKEN = '7501427979:AAE-r03vaNZjuATvSL5FUdAHqn2BjwV0Gok'
 TELEGRAM_CHAT_ID = '1887133385'
 bot = Bot(token=TELEGRAM_TOKEN)
 
+# Paramètres dynamiques
+initial_investment = Decimal('20')  # Montant investi
+transaction_brokerage = Decimal('0.075')  # Frais sur Binance 0.075%
+min_profit = min_profit = initial_investment * Decimal('0.01') # Profit minimum attendu en %
+
+# Montant minimum de profit pour déclencher l'arbitrage (par exemple 0,1% de profit)
+min_profit_threshold = Decimal('0.001')  # Seuil de profit minimum de 0,1%
+
 # Fonction d'envoi de notifications sur Telegram
 def send_telegram_message(message):
     try:
         bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
     except Exception as e:
-        logging.error(f"Error sending Telegram message: {str(e)}")
+        logging.error(f"Erreur lors de l'envoi d'un message Telegram: {str(e)}")
+
+def send_telegram_message_if_critical(message, critical=False):
+    if critical:
+        send_telegram_message(message)
+
+# Fonction pour vérifier si une valeur flottante est proche de zéro
+def check_if_float_zero(value):
+    return math.isclose(value, 0.0, abs_tol=1e-3)
 
 # Configuration de la journalisation avec rotation des logs
 log_file = "arbitrage.log"
-handler = TimedRotatingFileHandler(log_file, when="midnight", interval=1, backupCount=1)
+handler = TimedRotatingFileHandler(log_file, when="midnight", interval=1, backupCount=7)
 handler.setFormatter(logging.Formatter('%(asctime)s %(message)s'))
-handler.suffix = "%Y-%m-%d"  # Ajouter la date dans le nom du fichier log
-
+handler.suffix = "%Y-%m-%d"
 logging.basicConfig(level=logging.INFO, handlers=[handler])
 
-# Exemple de message dans les logs
-logging.info("Logging system initialized with daily rotation")
+logging.info("Système de journalisation initialisé avec rotation quotidienne")
 
-# Frais par plateforme (éditables)
-fees = {
-    'binance': 0.00075,  # Supposons une réduction de frais avec BNB
-    'kucoin': 0.0008,    # Supposons une réduction de frais avec KCS
-    'kraken': 0.0026,    # Frais standard pour Kraken
-}
-
-# Création des instances CCXT pour chaque exchange
-def connect_to_exchanges():
+# Connexion à l'API Binance via ccxt
+def connect_to_binance():
     try:
         binance = ccxt.binance({
             'apiKey': BINANCE_API_KEY,
             'secret': BINANCE_SECRET_KEY,
+            'enableRateLimit': True
         })
-        kucoin = ccxt.kucoin({
-            'apiKey': KUCOIN_API_KEY,
-            'secret': KUCOIN_SECRET_KEY,
-            'password': KUCOIN_PASSWORD,
-        })
-        kraken = ccxt.kraken({
-            'apiKey': KRAKEN_API_KEY,
-            'secret': KRAKEN_SECRET_KEY,
-        })
-        
-        # Charger les marchés pour CCXT (Binance, KuCoin, Kraken)
-        binance.load_markets()
-        kucoin.load_markets()
-        kraken.load_markets()
- 
-        # Envoyer un message Telegram lorsque le bot démarre avec succès
-        send_telegram_message("Arbitrage bot started successfully and connected to Binance, KuCoin, and Kraken.")
-        
-        logging.info("Connected to Binance, KuCoin, and Kraken successfully")
-        return binance, kucoin, kraken
+        return binance
     except Exception as e:
-        logging.error(f"Error connecting to exchanges: {str(e)}")
-        try:
-            bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"Error connecting to exchanges: {str(e)}")
-        except Exception as telegram_error:
-            logging.error(f"Error sending Telegram message: {str(telegram_error)}")
-        return None, None, None
+        logging.error(f"Erreur lors de la connexion à Binance: {str(e)}")
+        send_telegram_message(f"Erreur de connexion à Binance: {str(e)}")
+        return None
 
-binance, kucoin, kraken = connect_to_exchanges()
+binance = connect_to_binance()
+
+# Fonction pour récupérer les frais de trading réels via l'API Binance
+def get_binance_fees():
+    try:
+        fees_info = binance.fetch_trading_fees()
+        if 'ETH/USDC' in fees_info:
+            return {
+                'binance': Decimal(fees_info['ETH/USDC']['maker'])  # Par exemple récupérer le maker fee
+            }
+        else:
+            logging.error("Frais pour ETH/USDC non disponibles via l'API, utilisation des frais par défaut.")
+            return fees  # Retour aux frais par défaut
+    except Exception as e:
+        logging.error(f"Erreur lors de la récupération des frais de Binance : {str(e)}")
+        return fees  # Utiliser les frais définis manuellement
+
+# Fonction pour récupérer le prix actuel d'une paire de trading
+def fetch_current_ticker_price(ticker):
+    current_ticker_details = binance.fetch_ticker(ticker)
+    ticker_price = current_ticker_details['close'] if current_ticker_details is not None else None
+    return ticker_price
+    
+# Simuler Achat-Vente-Achat
+def simulate_buy_sell_buy():
+    try:
+        eth_usdc_price = fetch_current_ticker_price('ETH/USDC')
+        eth_btc_price = fetch_current_ticker_price('ETH/BTC')
+        btc_usdc_price = fetch_current_ticker_price('BTC/USDC')
+
+        eth_amount = initial_investment / Decimal(eth_usdc_price)
+        btc_amount = eth_amount * Decimal(eth_btc_price)
+        final_eth_amount = btc_amount / Decimal(btc_usdc_price)
+
+        logging.info(f"Simulation Achat-Vente-Achat : Final ETH amount: {final_eth_amount}")
+        return final_eth_amount  # Retourne le montant final en ETH
+    except Exception as e:
+        logging.error(f"Erreur lors de la simulation Achat-Vente-Achat : {str(e)}")
+        return None
+
+# Simuler Achat-Achat-Vente
+def simulate_buy_buy_sell():
+    try:
+        eth_usdc_price = fetch_current_ticker_price('ETH/USDC')
+        eth_btc_price = fetch_current_ticker_price('ETH/BTC')
+        btc_usdc_price = fetch_current_ticker_price('BTC/USDC')
+
+        eth_amount = initial_investment / Decimal(eth_usdc_price)
+        btc_amount = eth_amount * Decimal(eth_btc_price)
+        final_usdc_amount = btc_amount * Decimal(btc_usdc_price)
+
+        logging.info(f"Simulation Achat-Achat-Vente : Final USDC amount: {final_usdc_amount}")
+        return final_usdc_amount
+    except Exception as e:
+        logging.error(f"Erreur lors de la simulation Achat-Achat-Vente : {str(e)}")
+        return None
+
+# Simuler Achat-Vente-Vente
+def simulate_buy_sell_sell():
+    try:
+        eth_usdc_price = fetch_current_ticker_price('ETH/USDC')
+        eth_btc_price = fetch_current_ticker_price('ETH/BTC')
+        btc_usdc_price = fetch_current_ticker_price('BTC/USDC')
+
+        eth_amount = initial_investment / Decimal(eth_usdc_price)
+        btc_amount = eth_amount * Decimal(eth_btc_price)
+        final_usdc_amount = btc_amount * Decimal(btc_usdc_price)
+
+        logging.info(f"Simulation Achat-Vente-Vente : Final USDC amount: {final_usdc_amount}")
+        return final_usdc_amount
+    except Exception as e:
+        logging.error(f"Erreur lors de la simulation Achat-Vente-Vente : {str(e)}")
+        return None
+
+# Fonction pour exécuter les ordres d'achat et vente
+def execute_order(symbol, side, amount):
+    try:
+        if side == 'buy':
+            order = binance.create_market_buy_order(symbol, amount)
+        else:
+            order = binance.create_market_sell_order(symbol, amount)
+        return order
+    except Exception as e:
+        logging.error(f"Erreur lors de l'exécution de l'ordre {side} pour {symbol}: {str(e)}")
+        send_telegram_message(f"Erreur lors de l'exécution de l'ordre {side} pour {symbol}: {str(e)}")
+        return None
         
-def retry_request(func, *args, max_retries=5, delay=2, **kwargs):
-    retries = 0
-    while retries < max_retries:
-        try:
-            return func(*args, **kwargs)
-        except Exception as e:
-            logging.error(f"Error in {func.__name__}: {str(e)}. Retrying {retries + 1}/{max_retries}...")
-            time.sleep(delay)
-            retries += 1
-    logging.error(f"Max retries exceeded for {func.__name__}")
+def execute_order_with_retry(symbol, side, amount, retries=3):
+    attempt = 0
+    while attempt < retries:
+        order = execute_order(symbol, side, amount)  # Appel correct
+        if check_order_filled(order):
+            return order
+        attempt += 1
+        time.sleep(0.1)  # Attendre 100ms avant de réessayer
+    logging.error(f"Erreur : L'ordre {side} pour {symbol} n'a pas été rempli après {retries} tentatives.")
     return None
 
-# Récupération des frais via l'API CCXT
-def get_trading_fees(exchange, pair):
+# Fonction pour vérifier si les ordres sont remplis
+def check_order_filled(order):
+    return order and order['status'] == 'closed'
+
+# Fonction pour exécuter les trois ordres en simultané et vérifier qu'ils sont remplis
+def execute_arbitrage_orders():
     try:
-        if exchange.id == 'kucoin':
-            # Définir des frais par défaut pour KuCoin, car fetchTradingFees() n'est pas supporté
-            return {'maker': Decimal('0.001'), 'taker': Decimal('0.001')}  # 0.1% maker/taker par défaut
-        else:
-            fees = exchange.fetch_trading_fees()
-            if pair in fees:
-                return fees[pair]
-            else:
-                logging.warning(f"Fees for {pair} not found, using default fees for {exchange.id}")
-                return {
-                    'maker': Decimal(fees.get('maker', 0.001)),
-                    'taker': Decimal(fees.get('taker', 0.001))
-                }
-    except Exception as e:
-        logging.error(f"Error fetching trading fees for {pair} on {exchange.id}: {str(e)}")
-        # Retourner des frais par défaut en cas d'erreur
-        return {
-            'maker': Decimal('0.001'),  # Frais par défaut 0.1% maker
-            'taker': Decimal('0.001')   # Frais par défaut 0.1% taker
-        }
-       
-# Fonction d'attente de remplissage d'ordre avec timeout
-def wait_for_order(exchange, order_id, pair, timeout=30):
-    start_time = datetime.datetime.now()
-    while True:
-        order_status = retry_request(exchange.fetch_order, order_id, pair)
-        if order_status:
-            status = order_status['status']
-            # Gérer les statuts possibles de l'ordre
-            if status in ['closed', 'filled', 'partially_closed', 'partially_filled']:
-                return order_status
-            elif status in ['canceled', 'rejected']:
-                logging.error(f"Order {order_id} on {pair} was {status}.")
-                send_telegram_message(f"Order {order_id} on {pair} was {status}.")
-                return None
-        # Vérifier si le timeout est atteint
-        if (datetime.datetime.now() - start_time).seconds > timeout:
-            logging.error(f"Order {order_id} on {pair} not filled within {timeout} seconds.")
-            send_telegram_message(f"Order {order_id} on {pair} not filled within {timeout} seconds.")
+        eth_usdc_price = fetch_current_ticker_price('ETH/USDC')
+        eth_amount = initial_investment / Decimal(eth_usdc_price)
+        
+        # Exécuter les ordres
+        order1 = execute_order_with_retry('ETH/USDC', 'buy', eth_amount)
+        if not check_order_filled(order1):
+            logging.error("L'ordre 1 n'a pas été rempli, arrêt de l'arbitrage.")
             return None
-        time.sleep(1)
-
-# Fonction pour vérifier si le volume disponible est suffisant dans le carnet d'ordres
-def check_orderbook_for_sufficient_volume(orderbook, amount_required, price_level=0):
-    volume_available = Decimal('0')
-    for level in orderbook['asks']:  # Tu peux aussi vérifier les 'bids' si nécessaire
-        volume_available += Decimal(level[1])
-        if volume_available >= amount_required * Decimal('0.98'):  # Tolérance de 2% sur le volume requis
-            return True
-    return False
-
-# Fonction pour rechercher des opportunités d'arbitrage triangulaire
-def triangular_arbitrage(exchange, pair1, pair2, pair3):
-    try:
-        # Montant à investir pour le premier ordre (ici, 10 USDC)
-        amount_to_invest = Decimal('30')  # Utiliser Decimal pour précision
         
-        # Récupérer les prix actuels pour les trois paires
-        ticker1 = exchange.fetch_ticker(pair1)
-        ticker2 = exchange.fetch_ticker(pair2)
-        ticker3 = exchange.fetch_ticker(pair3)
-
-        if ticker1 is None or ticker2 is None or ticker3 is None:
-            return
-
-        # Calculer les prix de conversion
-        price1 = Decimal(ticker1['ask']).quantize(Decimal('0.00000001'), rounding=ROUND_DOWN)  # Prix d'achat BTC/USDC
-        price2 = Decimal(ticker2['ask']).quantize(Decimal('0.00000001'), rounding=ROUND_DOWN)  # Prix d'achat ETH/USDC 
-        price3 = Decimal(ticker3['bid']).quantize(Decimal('0.00000001'), rounding=ROUND_DOWN)  # Prix de vente LTC/BTC
-
+        order2 = execute_order_with_retry('ETH/BTC', 'sell', eth_amount)
+        if not check_order_filled(order2):
+            logging.error("L'ordre 2 n'a pas été rempli, arrêt de l'arbitrage.")
+            return None
         
-        # Logguer chaque analyse du marché
-        logging.info(f"Market Analysis: {pair1} price1: {price1}, {pair2} price2: {price2}, {pair3} price3: {price3}")
+        btc_amount = eth_amount * Decimal(fetch_current_ticker_price('ETH/BTC'))
+        order3 = execute_order_with_retry('BTC/USDC', 'sell', btc_amount)
+        if not check_order_filled(order3):
+            logging.error("L'ordre 3 n'a pas été rempli, arrêt de l'arbitrage.")
+            return None
         
-        # Vérifier si le volume disponible dans le carnet d'ordres est suffisant pour chaque paire
-        orderbook1 = exchange.fetch_order_book(pair1)
-        orderbook2 = exchange.fetch_order_book(pair2)
-        orderbook3 = exchange.fetch_order_book(pair3)
-
-        # Log détaillé des volumes disponibles
-        logging.info(f"Orderbook BTC/USDC: {orderbook1['asks'][0][1]} units at price {orderbook1['asks'][0][0]}")
-        logging.info(f"Orderbook ETH/USDC: {orderbook2['bids'][0][1]} units at price {orderbook2['bids'][0][0]}")
-        logging.info(f"Orderbook LTC/BTC: {orderbook3['bids'][0][1]} units at price {orderbook3['bids'][0][0]}")
-
-        # Appeler la fonction pour vérifier le volume
-        if not check_orderbook_for_sufficient_volume(orderbook1, amount_to_invest / price1) or \
-           not check_orderbook_for_sufficient_volume(orderbook2, amount_to_invest * price2) or \
-           not check_orderbook_for_sufficient_volume(orderbook3, amount_to_invest * price3):
-            logging.info(f"Insufficient volume for arbitrage: {pair1}, {pair2}, {pair3}")
-            return
-        
-        # Récupérer les frais spécifiques pour chaque paire
-        fees_pair1 = get_trading_fees(exchange, pair1)
-        fees_pair2 = get_trading_fees(exchange, pair2)
-        fees_pair3 = get_trading_fees(exchange, pair3)
-        
-        fee1 = Decimal(fees_pair1['taker']) if fees_pair1 else Decimal('0.001')  # Frais pour l'ordre d'achat
-        fee2 = Decimal(fees_pair2['taker']) if fees_pair2 else Decimal('0.001')  # Frais pour l'ordre d'achat
-        fee3 = Decimal(fees_pair3['taker']) if fees_pair3 else Decimal('0.001')  # Frais pour l'ordre d'achat
-        
-        # Conversion initiale de 10 USDC en BTC
-        btc_amount = (amount_to_invest / price1) * (Decimal('1') - fee1)
-        btc_amount = btc_amount.quantize(Decimal('0.00000001'), rounding=ROUND_DOWN)  # Arrondi à 8 décimales
-
-        
-        # Conversion de BTC en ETH
-        eth_amount = btc_amount * price2 * (Decimal('1') - fee2)
-        eth_amount = eth_amount.quantize(Decimal('0.00000001'), rounding=ROUND_DOWN)  # Arrondi à 8 décimales
-
-
-        # Conversion de ETH en LTC
-        ltc_amount = eth_amount * price3 * (Decimal('1') - fee3)
-        ltc_amount = ltc_amount.quantize(Decimal('0.00000001'), rounding=ROUND_DOWN)  # Arrondi à 8 décimales
-
-
-        # Calcul du profit : Comparer le montant final en LTC avec l'investissement initial en USDC
-        arbitrage_profit = (ltc_amount - amount_to_invest).quantize(Decimal('0.00000001'), rounding=ROUND_DOWN)
-       
-        if arbitrage_profit > Decimal(0):  # Vérifier que le profit est positif
-            logging.info(f"Arbitrage Opportunity Found: {pair1} -> {pair2} -> {pair3} with profit {arbitrage_profit}")
-            send_telegram_message(f"Arbitrage Opportunity: {pair1} -> {pair2} -> {pair3} | Profit: {arbitrage_profit}")
-            
-            # Simuler ou exécuter l'ordre avec 10 USDC
-            execute_trade(exchange, pair1, pair2, pair3, amount_to_invest, tick_size1=0.000001, tick_size2=0.000001, tick_size3=0.000001)
-        else:
-            logging.info(f"No arbitrage opportunity for {pair1} -> {pair2} -> {pair3}")
+        # Vérifier que tous les ordres sont remplis
+        final_usdc_amount = btc_amount * Decimal(fetch_current_ticker_price('BTC/USDC'))
+        return final_usdc_amount
     except Exception as e:
-        logging.error(f"Error in triangular_arbitrage: {str(e)}")
-        send_telegram_message(f"Error in triangular_arbitrage: {str(e)}")
+        logging.error(f"Erreur lors de l'exécution des ordres d'arbitrage: {str(e)}")
+        send_telegram_message(f"Erreur lors de l'exécution des ordres d'arbitrage: {str(e)}")
+        return None
 
-# Fonction pour exécuter le trade en tenant compte des frais et des tailles de ticks
-def execute_trade(exchange, pair1, pair2, pair3, amount_to_invest, tick_size1, tick_size2, tick_size3):
-    try:
-        # Étape 1: Récupérer les frais pour chaque paire
-        fees_pair1 = get_trading_fees(exchange, pair1)
-        fees_pair2 = get_trading_fees(exchange, pair2)
-        fees_pair3 = get_trading_fees(exchange, pair3)
-        fee1 = Decimal(fees_pair1['taker'])
-        
-        # Assumer que les frais taker sont appliqués (dans le cas d'un ordre au marché)
-        fee1 = Decimal(fees_pair1['taker']).quantize(Decimal('0.00000001'), rounding=ROUND_DOWN) if fees_pair1 else 0.001  # Appliquer un frais par défaut si non récupérable
-        fee2 = Decimal(fees_pair2['taker']).quantize(Decimal('0.00000001'), rounding=ROUND_DOWN) if fees_pair2 else 0.001
-        fee3 = Decimal(fees_pair3['taker']).quantize(Decimal('0.00000001'), rounding=ROUND_DOWN) if fees_pair3 else 0.001
-
-        # Étape 2: Calculer la quantité à acheter pour la première paire, ajustée par les frais
-        ticker1 = exchange.fetch_ticker(pair1)
-        price1 = Decimal(ticker1['ask']).quantize(Decimal('0.00000001'), rounding=ROUND_DOWN)
-        amount_base_currency = (Decimal(amount_to_invest) / Decimal(price1)) * (Decimal('1') - Decimal(fee1))
-        amount_base_currency = amount_base_currency.quantize(Decimal('0.00000001'), rounding=ROUND_DOWN)
-
-
-        # Passer le premier ordre (achat)
-        logging.info(f'Placing first order: {amount_base_currency} {pair1}')
-        order1 = exchange.create_order(pair1, 'market', 'buy', float(amount_base_currency))
-        order_id1 = order1['id']
-        
-        # Vérifier que l'ordre est rempli
-        while True:
-            order_status = exchange.fetch_order(order_id1, pair1)
-            if order_status['status'] == 'closed':
-                amount_base_currency = Decimal(order_status['filled']).quantize(Decimal('0.00000001'), rounding=ROUND_DOWN)
-                break
-            time.sleep(1)
-
-        # Étape 3: Calculer la quantité pour la deuxième paire
-        ticker2 = exchange.fetch_ticker(pair2)
-        price2 = ticker2['bid']
-        amount_second_currency = (amount_base_currency * Decimal(price2)) * (Decimal('1') - Decimal(fee2))
-        amount_second_currency = amount_second_currency.quantize(Decimal('0.00000001'), rounding=ROUND_DOWN)
-
-        # Passer le deuxième ordre (vente)
-        logging.info(f'Placing second order: {amount_second_currency} {pair2}')
-        order2 = exchange.create_order(pair2, 'market', 'sell', float(amount_second_currency))
-        order_id2 = order2['id']
-        
-        # Vérifier que l'ordre est rempli
-        while True:
-            order_status = exchange.fetch_order(order_id2, pair2)
-            if order_status['status'] == 'closed':
-                amount_second_currency = Decimal(order_status['cost']).quantize(Decimal('0.00000001'), rounding=ROUND_DOWN)
-                break
-            time.sleep(1)
-
-        # Étape 4: Calculer la quantité pour la troisième paire
-        ticker3 = exchange.fetch_ticker(pair3)
-        price3 = ticker3['bid']
-        amount_third_currency = (amount_second_currency * Decimal(price3)) * (Decimal('1') - Decimal(fee3))
-        amount_third_currency = amount_third_currency.quantize(Decimal('0.00000001'), rounding=ROUND_DOWN)
-
-        # Passer le troisième ordre (vente)
-        logging.info(f'Placing third order: {amount_third_currency} {pair3}')
-        order3 = exchange.create_order(pair3, 'market', 'sell', float(amount_third_currency))
-        order_id3 = order3['id']
-
-        # Vérifier que l'ordre est rempli
-        while True:
-            order_status = exchange.fetch_order(order_id3, pair3)
-            if order_status['status'] == 'closed':
-                logging.info(f'Triangular arbitrage completed: {pair1} -> {pair2} -> {pair3}')
-                break
-            time.sleep(1)
-
-        # Message Telegram avec les détails de l'arbitrage terminé et les profits
-        arbitrage_profit = (price1 * price2 * price3).quantize(Decimal('0.00000001'), rounding=ROUND_DOWN)  # Recalcule ou récupère le profit si nécessaire
-        send_telegram_message(f"Executed triangular trade: {pair1}, {pair2}, {pair3} with {amount_to_invest} USDC and profit: {arbitrage_profit}")
-        
-        logging.info(f"Executed triangular trade: {pair1}, {pair2}, {pair3} with {amount_to_invest} USDC")
-        
-        logging.info(f"Fees for {pair1}: Maker: {fees_pair1['maker']}, Taker: {fees_pair1['taker']}")
-        logging.info(f"Fees for {pair2}: Maker: {fees_pair2['maker']}, Taker: {fees_pair2['taker']}")
-        logging.info(f"Fees for {pair3}: Maker: {fees_pair3['maker']}, Taker: {fees_pair3['taker']}")
+# Fonction pour calculer le profit net après les frais
+def check_profit_loss(total_price_after_sell, initial_investment, transaction_brokerage, min_profit):
+    apprx_brokerage = transaction_brokerage * initial_investment / 100 * 3  # Frais sur 3 transactions
+    min_profitable_price = initial_investment + apprx_brokerage + min_profit
+    profit_loss = round(total_price_after_sell - min_profitable_price, 3)
+    return profit_loss
     
+# Simuler Achat-Achat-Vente
+def check_buy_buy_sell():
+    final_usdc_amount = execute_arbitrage_orders()  # Exécuter les ordres
+    return final_usdc_amount
+
+# Simuler Achat-Vente-Vente
+def check_buy_sell_sell():
+    final_usdc_amount = execute_arbitrage_orders()  # Exécuter les ordres
+    return final_usdc_amount
+
+# Fonction pour détecter une opportunité d'arbitrage triangulaire
+def find_arbitrage_opportunity():
+    try:
+        # Récupérer les prix des paires ETH/USDC, ETH/BTC, BTC/USDC
+        eth_usdc_price = fetch_current_ticker_price('ETH/USDC')
+        eth_btc_price = fetch_current_ticker_price('ETH/BTC')
+        btc_usdc_price = fetch_current_ticker_price('BTC/USDC')
+
+        # Calcul du profit net
+        net_profit = (1 / Decimal(eth_usdc_price)) * Decimal(eth_btc_price) * Decimal(btc_usdc_price) - Decimal(1)
+
+        if net_profit > min_profit_threshold:
+            logging.info(f"Arbitrage trouvé ! Profit potentiel après frais : {net_profit}")
+            send_telegram_message(f"Arbitrage trouvé ! Profit potentiel : {net_profit}")
+            return True
+        else:
+            logging.info(f"Pas d'opportunité rentable. Profit potentiel : {net_profit}")
+            return False
     except Exception as e:
-        logging.error(f"Error executing trade: {str(e)}")
-        send_telegram_message(f"Error executing trade: {str(e)}")
+        logging.error(f"Erreur lors du calcul de l'arbitrage: {str(e)}")
+        send_telegram_message(f"Erreur lors du calcul de l'arbitrage: {str(e)}")
+        return False
 
-# Liste des paires à surveiller pour l'arbitrage triangulaire
-pairs_to_watch = [
-    ('BTC/USDC', 'ETH/USDC', 'LTC/BTC'),  # Exemple de trio
-]
+# Fonction pour choisir et exécuter la stratégie la plus rentable
+def execute_if_profitable():
+    # Simuler les stratégies
+    final_price_buy_sell_buy = simulate_buy_sell_buy()
+    final_price_buy_buy_sell = simulate_buy_buy_sell()
+    final_price_buy_sell_sell = simulate_buy_sell_sell()
 
-# Fonction pour surveiller les opportunités d'arbitrage triangulaire
-def monitor_arbitrage_opportunities():
-    while True:
-        try:
-            for pair1, pair2, pair3 in pairs_to_watch:
-                # Vérifier si chaque exchange est connecté avant d'exécuter l'arbitrage
-                if binance is not None:
-                    try:
-                        triangular_arbitrage(binance, pair1, pair2, pair3)
-                    except Exception as e:
-                        logging.error(f"Error in triangular_arbitrage for Binance: {str(e)}")
-                
-                if kucoin is not None:
-                    try:
-                        triangular_arbitrage(kucoin, pair1, pair2, pair3)
-                    except Exception as e:
-                        logging.error(f"Error in triangular_arbitrage for KuCoin: {str(e)}")
-                
-                if kraken is not None:
-                    try:
-                        triangular_arbitrage(kraken, pair1, pair2, pair3)
-                    except Exception as e:
-                        logging.error(f"Error in triangular_arbitrage for Kraken: {str(e)}")
-            
-            time.sleep(1)  # Pause de 1 secondes entre chaque vérification
-        except Exception as e:
-            logging.error(f"Error in monitor_arbitrage_opportunities: {str(e)}")
-            send_telegram_message(f"Error in monitor_arbitrage_opportunities: {str(e)}")
-            time.sleep(60)  # Attendre 60 secondes avant de réessayer en cas d'erreur
+    # Calculer les profits pour les trois stratégies
+    if final_price_buy_buy_sell and final_price_buy_sell_sell and final_price_buy_sell_buy:
+        profit_loss_buy_buy_sell = check_profit_loss(final_price_buy_buy_sell, initial_investment, transaction_brokerage, min_profit)
+        profit_loss_buy_sell_sell = check_profit_loss(final_price_buy_sell_sell, initial_investment, transaction_brokerage, min_profit)
+        profit_loss_buy_sell_buy = check_profit_loss(final_price_buy_sell_buy, initial_investment, transaction_brokerage, min_profit)
 
-# Lancer la surveillance des opportunités d'arbitrage
-monitor_arbitrage_opportunities()
+        logging.info(f"Profit Achat-Achat-Vente: {profit_loss_buy_buy_sell}")
+        logging.info(f"Profit Achat-Vente-Vente: {profit_loss_buy_sell_sell}")
+        logging.info(f"Profit Achat-Vente-Achat: {profit_loss_buy_sell_buy}")
+
+        # Comparer les trois stratégies et exécuter la plus rentable
+        if profit_loss_buy_buy_sell > min_profit_threshold and profit_loss_buy_buy_sell > profit_loss_buy_sell_sell and profit_loss_buy_buy_sell > profit_loss_buy_sell_buy:
+            logging.info(f"Exécution de la stratégie Achat-Achat-Vente avec un profit de : {profit_loss_buy_buy_sell}")
+            execute_arbitrage_orders()  # Appel réel pour exécuter cette stratégie
+        elif profit_loss_buy_sell_sell > min_profit_threshold and profit_loss_buy_sell_sell > profit_loss_buy_buy_sell and profit_loss_buy_sell_sell > profit_loss_buy_sell_buy:
+            logging.info(f"Exécution de la stratégie Achat-Vente-Vente avec un profit de : {profit_loss_buy_sell_sell}")
+            execute_arbitrage_orders()  # Appel réel pour exécuter cette stratégie
+        elif profit_loss_buy_sell_buy > min_profit_threshold:
+            logging.info(f"Exécution de la stratégie Achat-Vente-Achat avec un profit de : {profit_loss_buy_sell_buy}")
+            execute_arbitrage_orders()  # Appel réel pour exécuter cette stratégie
+        else:
+            logging.info("Aucune stratégie rentable détectée.")
+            send_telegram_message("Aucune stratégie rentable détectée.")
+    else:
+        logging.error("Erreur dans la simulation des stratégies.")
+
+# Boucle principale pour rechercher des opportunités d'arbitrage
+while True:
+    if find_arbitrage_opportunity():
+        execute_if_profitable()  # Simuler et n'exécuter que si rentable
+    time.sleep(2)  # Ajuster en fonction de la performance
