@@ -18,10 +18,12 @@ bot = Bot(token=TELEGRAM_TOKEN)
 # Paramètres dynamiques
 initial_investment = Decimal('40')  # Montant investi
 transaction_brokerage = Decimal('0.075')  # Frais sur Binance 0.075%
-min_profit = min_profit = initial_investment * Decimal('0.005') # Profit minimum attendu soit 0,5%
+min_profit_threshold = initial_investment * Decimal('0.005')  # 0,5% de l'investissement initial
+min_profit = initial_investment * Decimal('0.005')  # 0,5% de l'investissement initial
 
-# Montant minimum de profit pour déclencher l'arbitrage (par exemple 0,1% de profit)
-min_profit_threshold = Decimal('0.001')  # Seuil de profit minimum de 0,1%
+DEFAULT_FEES = {
+    'binance': Decimal('0.00075')  # Frais fixes par défaut : 0,075%
+}
 
 # Fonction d'envoi de notifications sur Telegram
 def send_telegram_message(message):
@@ -48,41 +50,74 @@ logging.basicConfig(level=logging.INFO, handlers=[handler])
 logging.info("Système de journalisation initialisé avec rotation quotidienne")
 
 # Connexion à l'API Binance via ccxt
-def connect_to_binance():
-    try:
-        binance = ccxt.binance({
-            'apiKey': BINANCE_API_KEY,
-            'secret': BINANCE_SECRET_KEY,
-            'enableRateLimit': True
-        })
-        return binance
-    except Exception as e:
-        logging.error(f"Erreur lors de la connexion à Binance: {str(e)}")
-        send_telegram_message(f"Erreur de connexion à Binance: {str(e)}")
-        return None
+def connect_to_binance_with_retry(retries=5, delay=5):
+    attempt = 0
+    while attempt < retries:
+        try:
+            binance = ccxt.binance({
+                'apiKey': BINANCE_API_KEY,
+                'secret': BINANCE_SECRET_KEY,
+                'enableRateLimit': True
+            })
+            # Test d'une requête simple pour s'assurer que la connexion est établie
+            binance.load_markets()
+            logging.info("Connexion à l'API Binance réussie.")
+            return binance
+        except Exception as e:
+            attempt += 1
+            logging.error(f"Erreur de connexion à l'API Binance (Tentative {attempt}/{retries}): {str(e)}")
+            send_telegram_message(f"Erreur de connexion à l'API Binance, tentative {attempt}/{retries}.")
+            if attempt < retries:
+                logging.info(f"Nouvelle tentative dans {delay} secondes.")
+                time.sleep(delay)
+            else:
+                logging.error("Toutes les tentatives de connexion à l'API Binance ont échoué.")
+                send_telegram_message_if_critical("Impossible de se connecter à l'API Binance après plusieurs tentatives. Bot arrêté.", critical=True)
+                return None
 
-binance = connect_to_binance()
+binance = connect_to_binance_with_retry()
+
+def ensure_binance_connection():
+    global binance
+    if binance is None:
+        logging.info("Tentative de reconnexion à l'API Binance.")
+        binance = connect_to_binance_with_retry()
+    return binance
+
+# Fonction pour récupérer le prix actuel d'une paire de trading
+def fetch_current_ticker_price(ticker):
+    binance = ensure_binance_connection()  # Vérifier et reconnecter si nécessaire
+    if binance:
+        try:
+            current_ticker_details = binance.fetch_ticker(ticker)
+            ticker_price = current_ticker_details['close'] if current_ticker_details is not None else None
+            return ticker_price
+        except Exception as e:
+            logging.error(f"Erreur lors de la récupération des prix pour {ticker}: {str(e)}")
+            return None
+    else:
+        logging.error(f"Impossible de se connecter à Binance pour récupérer les prix de {ticker}.")
+        return None
 
 # Fonction pour récupérer les frais de trading réels via l'API Binance
 def get_binance_fees():
     try:
+        # Récupérer les frais de trading via l'API Binance
         fees_info = binance.fetch_trading_fees()
+        
+        # Vérifier si les frais pour une paire spécifique sont disponibles
         if 'ETH/USDC' in fees_info:
             return {
-                'binance': Decimal(fees_info['ETH/USDC']['maker'])  # Par exemple récupérer le maker fee
+                'binance': Decimal(fees_info['ETH/USDC']['maker'])  # Frais réels récupérés pour ETH/USDC
             }
         else:
             logging.error("Frais pour ETH/USDC non disponibles via l'API, utilisation des frais par défaut.")
-            return fees  # Retour aux frais par défaut
+            return DEFAULT_FEES  # Retour aux frais fixes par défaut
     except Exception as e:
         logging.error(f"Erreur lors de la récupération des frais de Binance : {str(e)}")
-        return fees  # Utiliser les frais définis manuellement
+        return DEFAULT_FEES  # Utiliser les frais fixes par défaut en cas d'échec
 
-# Fonction pour récupérer le prix actuel d'une paire de trading
-def fetch_current_ticker_price(ticker):
-    current_ticker_details = binance.fetch_ticker(ticker)
-    ticker_price = current_ticker_details['close'] if current_ticker_details is not None else None
-    return ticker_price
+fees = get_binance_fees()  # Récupérer les frais réels ou appliquer des frais fixes
     
 # Simuler Achat-Vente-Achat
 def simulate_buy_sell_buy():
@@ -137,15 +172,20 @@ def simulate_buy_sell_sell():
 
 # Fonction pour exécuter les ordres d'achat et vente
 def execute_order(symbol, side, amount):
-    try:
-        if side == 'buy':
-            order = binance.create_market_buy_order(symbol, amount)
-        else:
-            order = binance.create_market_sell_order(symbol, amount)
-        return order
-    except Exception as e:
-        logging.error(f"Erreur lors de l'exécution de l'ordre {side} pour {symbol}: {str(e)}")
-        send_telegram_message(f"Erreur lors de l'exécution de l'ordre {side} pour {symbol}: {str(e)}")
+    binance = ensure_binance_connection()  # Vérifier et reconnecter si nécessaire
+    if binance:
+        try:
+            if side == 'buy':
+                order = binance.create_market_buy_order(symbol, amount)
+            else:
+                order = binance.create_market_sell_order(symbol, amount)
+            return order
+        except Exception as e:
+            logging.error(f"Erreur lors de l'exécution de l'ordre {side} pour {symbol}: {str(e)}")
+            send_telegram_message(f"Erreur lors de l'exécution de l'ordre {side} pour {symbol}: {str(e)}")
+            return None
+    else:
+        logging.error(f"Impossible de se connecter à Binance pour exécuter un ordre sur {symbol}.")
         return None
         
 def execute_order_with_retry(symbol, side, amount, retries=3):
@@ -157,6 +197,7 @@ def execute_order_with_retry(symbol, side, amount, retries=3):
         attempt += 1
         time.sleep(0.1)  # Attendre 100ms avant de réessayer
     logging.error(f"Erreur : L'ordre {side} pour {symbol} n'a pas été rempli après {retries} tentatives.")
+    send_telegram_message_if_critical(f"Échec de l'ordre {side} pour {symbol} après {retries} tentatives. Bot arrêté.", critical=True)
     return None
 
 # Fonction pour vérifier si les ordres sont remplis
@@ -194,9 +235,9 @@ def execute_arbitrage_orders():
         send_telegram_message(f"Erreur lors de l'exécution des ordres d'arbitrage: {str(e)}")
         return None
 
-# Fonction pour calculer le profit net après les frais
-def check_profit_loss(total_price_after_sell, initial_investment, transaction_brokerage, min_profit):
-    apprx_brokerage = transaction_brokerage * initial_investment / 100 * 3  # Frais sur 3 transactions
+# Calcul du profit net en utilisant les frais récupérés ou par défaut
+def check_profit_loss(total_price_after_sell, initial_investment, fees, min_profit):
+    apprx_brokerage = fees['binance'] * initial_investment * 3  # Frais sur 3 transactions
     min_profitable_price = initial_investment + apprx_brokerage + min_profit
     profit_loss = round(total_price_after_sell - min_profitable_price, 3)
     return profit_loss
@@ -241,11 +282,11 @@ def execute_if_profitable():
     final_price_buy_buy_sell = simulate_buy_buy_sell()
     final_price_buy_sell_sell = simulate_buy_sell_sell()
 
-    # Calculer les profits pour les trois stratégies
+    # Calculer les profits pour les trois stratégies avec les frais récupérés
     if final_price_buy_buy_sell and final_price_buy_sell_sell and final_price_buy_sell_buy:
-        profit_loss_buy_buy_sell = check_profit_loss(final_price_buy_buy_sell, initial_investment, transaction_brokerage, min_profit)
-        profit_loss_buy_sell_sell = check_profit_loss(final_price_buy_sell_sell, initial_investment, transaction_brokerage, min_profit)
-        profit_loss_buy_sell_buy = check_profit_loss(final_price_buy_sell_buy, initial_investment, transaction_brokerage, min_profit)
+        profit_loss_buy_buy_sell = check_profit_loss(final_price_buy_buy_sell, initial_investment, fees, min_profit)
+        profit_loss_buy_sell_sell = check_profit_loss(final_price_buy_sell_sell, initial_investment, fees, min_profit)
+        profit_loss_buy_sell_buy = check_profit_loss(final_price_buy_sell_buy, initial_investment, fees, min_profit)
 
         logging.info(f"Profit Achat-Achat-Vente: {profit_loss_buy_buy_sell}")
         logging.info(f"Profit Achat-Vente-Vente: {profit_loss_buy_sell_sell}")
