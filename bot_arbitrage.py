@@ -260,10 +260,22 @@ def find_arbitrage_opportunity():
         eth_btc_price = fetch_current_ticker_price('ETH/BTC')
         btc_usdc_price = fetch_current_ticker_price('BTC/USDC')
 
-        # Calcul du profit net
-        net_profit = (1 / Decimal(eth_usdc_price)) * Decimal(eth_btc_price) * Decimal(btc_usdc_price) - Decimal(1)
+        # Vérifier que tous les prix sont bien récupérés
+        if eth_usdc_price is None or eth_btc_price is None or btc_usdc_price is None:
+            logging.error("Erreur dans la récupération des prix, impossible de calculer l'arbitrage.")
+            return False
 
-        if net_profit > min_profit_threshold:
+        # Prendre en compte l'investissement initial de 40 USDC
+        investment = initial_investment  # 40 USDC dans ton cas
+
+        # Prendre en compte les frais sur les trois transactions
+        total_fees = fees['binance'] * 3  # Frais sur 3 transactions
+
+        # Calcul du profit net en incluant les frais et l'investissement
+        net_profit = ((investment / Decimal(eth_usdc_price)) * Decimal(eth_btc_price) * Decimal(btc_usdc_price)) * (1 - total_fees) - investment
+
+        # Comparaison avec le min_profit attendu
+        if net_profit > min_profit:
             logging.info(f"Arbitrage trouvé ! Profit potentiel après frais : {net_profit}")
             send_telegram_message(f"Arbitrage trouvé ! Profit potentiel : {net_profit}")
             return True
