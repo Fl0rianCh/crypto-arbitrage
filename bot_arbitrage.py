@@ -127,6 +127,66 @@ def get_binance_fees():
 
 fees = get_binance_fees()  # Récupérer les frais réels ou appliquer des frais fixes
 
+def check_market_status():
+    binance = ensure_binance_connection()  # Vérifier la connexion
+    if binance:
+        try:
+            status = binance.fetch_status()  # Récupérer l'état global du marché
+            if status['status'] == 'ok':
+                logging.info("Le marché Binance est ouvert et opérationnel.")
+                return True
+            else:
+                logging.warning(f"Le marché est fermé : {status['status']}")
+                send_telegram_message("Le marché Binance est actuellement fermé.")
+                return False
+        except Exception as e:
+            logging.error(f"Erreur lors de la vérification de l'état du marché: {str(e)}")
+            send_telegram_message(f"Erreur lors de la vérification de l'état du marché: {str(e)}")
+            return False
+    else:
+        return False
+
+def check_market_status_for_pair(pair):
+    binance = ensure_binance_connection()  # Vérifier la connexion
+    if binance:
+        try:
+            market = binance.market(pair)
+            if market['active']:
+                logging.info(f"Le marché pour {pair} est ouvert.")
+                return True
+            else:
+                logging.warning(f"Le marché pour {pair} est fermé.")
+                send_telegram_message(f"Le marché pour {pair} est actuellement fermé.")
+                return False
+        except Exception as e:
+            logging.error(f"Erreur lors de la vérification du marché pour {pair}: {str(e)}")
+            send_telegram_message(f"Erreur lors de la vérification du marché pour {pair}: {str(e)}")
+            return False
+    else:
+        return False
+
+def generate_valid_pair(crypto):
+    btc_pair = f'{crypto}/BTC'
+    eth_pair = f'{crypto}/ETH'
+
+    # Éviter de générer des paires identiques comme ETH/ETH
+    if crypto == 'BTC':
+        return eth_pair  # Utiliser ETH si la crypto est BTC
+    elif crypto == 'ETH':
+        return btc_pair  # Utiliser BTC si la crypto est ETH
+    else:
+        # Vérifier si les paires existent sur Binance
+        btc_price = fetch_current_ticker_price(btc_pair)
+        eth_price = fetch_current_ticker_price(eth_pair)
+        
+        if btc_price:
+            return btc_pair
+        elif eth_price:
+            return eth_pair
+        else:
+            logging.error(f"Aucune paire BTC ou ETH disponible pour {crypto}")
+            return None
+
 def get_min_order_size(symbol):
     binance = ensure_binance_connection()
     if binance:
@@ -143,6 +203,15 @@ def get_min_order_size(symbol):
 # Simuler Achat-Vente-Achat
 def simulate_buy_sell_buy(pair):
     try:
+        crypto = pair.split('/')[0]  # Extraire la crypto (par exemple, ETH)
+        valid_pair = generate_valid_pair(crypto)  # Générer une paire valide (éviter ETH/ETH)
+
+        if valid_pair:
+            intermediate_price = fetch_current_ticker_price(valid_pair)
+        else:
+            logging.error(f"Aucune paire valide disponible pour {pair}")
+            return None
+
         # Récupérer le prix de la paire USDC/Crypto (ex: PEPE/USDC, BNB/USDC)
         ticker_price_1 = fetch_current_ticker_price(pair)
         crypto_btc_pair = pair.split('/')[0] + '/BTC'  
@@ -332,6 +401,11 @@ def check_order_filled(order):
 # Fonction pour exécuter les trois ordres en simultané et vérifier qu'ils sont remplis
 def execute_arbitrage_orders(pair, strategy):
     try:
+        # Vérifier l'état du marché avant chaque ordre
+        if not check_market_status_for_pair(pair):
+            logging.warning(f"Le marché pour {pair} est fermé.")
+            return None
+ 
         # Récupérer les prix de la paire USDC/Crypto
         crypto_usdc_price = fetch_current_ticker_price(pair)
         crypto_amount = initial_investment / Decimal(crypto_usdc_price)
@@ -359,11 +433,15 @@ def execute_arbitrage_orders(pair, strategy):
         # Gérer les stratégies ici
         if strategy == 'buy_sell_buy':
             # Acheter crypto avec USDC
+            if not check_market_status_for_pair(pair):  # Vérification
+                return None
             order1 = execute_order_with_retry(pair, 'buy', crypto_amount)
             if not check_order_filled(order1):
                 return None
 
             # Vendre crypto pour BTC ou ETH
+            if not check_market_status_for_pair(f'{pair.split("/")[0]}/{intermediate_pair}'):  # Vérification
+                return None
             order2 = execute_order_with_retry(f'{pair.split("/")[0]}/{intermediate_pair}', 'sell', crypto_amount)
             if not check_order_filled(order2):
                 return None
@@ -371,17 +449,24 @@ def execute_arbitrage_orders(pair, strategy):
             intermediate_amount = crypto_amount * Decimal(intermediate_price)
 
             # Vendre BTC/ETH pour USDC
+            if not check_market_status_for_pair(f'{intermediate_pair}/USDC'):  # Vérification
+                return None
             order3 = execute_order_with_retry(f'{intermediate_pair}/USDC', 'sell', intermediate_amount)
             if not check_order_filled(order3):
                 return None
 
+
         elif strategy == 'buy_buy_sell':
             # Acheter crypto avec USDC
+            if not check_market_status_for_pair(f'{intermediate_pair}/USDC'):  # Vérification
+                return None
             order1 = execute_order_with_retry(pair, 'buy', crypto_amount)
             if not check_order_filled(order1):
                 return None
 
             # Acheter BTC ou ETH avec la crypto
+            if not check_market_status_for_pair(f'{intermediate_pair}/USDC'):  # Vérification
+                return None
             order2 = execute_order_with_retry(f'{pair.split("/")[0]}/{intermediate_pair}', 'buy', crypto_amount)
             if not check_order_filled(order2):
                 return None
@@ -389,17 +474,23 @@ def execute_arbitrage_orders(pair, strategy):
             intermediate_amount = crypto_amount * Decimal(intermediate_price)
 
             # Vendre BTC/ETH pour USDC
+            if not check_market_status_for_pair(f'{intermediate_pair}/USDC'):  # Vérification
+                return None
             order3 = execute_order_with_retry(f'{intermediate_pair}/USDC', 'sell', intermediate_amount)
             if not check_order_filled(order3):
                 return None
 
         elif strategy == 'sell_sell_buy':
             # Vendre crypto contre USDC
+            if not check_market_status_for_pair(f'{intermediate_pair}/USDC'):  # Vérification
+                return None
             order1 = execute_order_with_retry(pair, 'sell', crypto_amount)
             if not check_order_filled(order1):
                 return None
 
             # Vendre BTC ou ETH contre une autre crypto
+            if not check_market_status_for_pair(f'{intermediate_pair}/USDC'):  # Vérification
+                return None
             order2 = execute_order_with_retry(f'{pair.split("/")[0]}/{intermediate_pair}', 'sell', crypto_amount)
             if not check_order_filled(order2):
                 return None
@@ -407,6 +498,8 @@ def execute_arbitrage_orders(pair, strategy):
             intermediate_amount = crypto_amount * Decimal(intermediate_price)
 
             # Acheter crypto contre USDC
+            if not check_market_status_for_pair(f'{intermediate_pair}/USDC'):  # Vérification
+                return None
             order3 = execute_order_with_retry(f'{intermediate_pair}/USDC', 'buy', intermediate_amount)
             if not check_order_filled(order3):
                 return None
@@ -450,8 +543,8 @@ def find_arbitrage_opportunity():
         matic_usdc_price = fetch_current_ticker_price('MATIC/USDC')
         bnb_usdc_price = fetch_current_ticker_price('BNB/USDC')
         xrp_usdc_price = fetch_current_ticker_price('XRP/USDC')
-        sui_usdc_price = fetch_current_ticker_price('SUI/USDC')
-        pepe_usdc_price = fetch_current_ticker_price('PEPE/USDC')
+        doge_usdc_price = fetch_current_ticker_price('DOGE/USDC')
+        ada_usdc_price = fetch_current_ticker_price('ADA/USDC')
 
         # Vérifier que tous les prix sont bien récupérés
         if None in [usdc_usdt_price, btc_usdc_price, eth_usdc_price, sol_usdc_price, 
