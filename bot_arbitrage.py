@@ -212,7 +212,7 @@ def simulate_buy_sell_buy(pair):
             logging.error(f"Aucune paire valide disponible pour {pair}")
             return None
 
-        # Récupérer le prix de la paire USDC/Crypto (ex: PEPE/USDC, BNB/USDC)
+        # Récupérer le prix de la paire USDC/Crypto (ex: ADA/USDC, BNB/USDC)
         ticker_price_1 = fetch_current_ticker_price(pair)
         crypto_btc_pair = pair.split('/')[0] + '/BTC'  
         crypto_eth_pair = pair.split('/')[0] + '/ETH'  
@@ -568,8 +568,8 @@ def find_arbitrage_opportunity():
         net_profits['MATIC'] = ((investment / Decimal(matic_usdc_price)) * Decimal(btc_usdc_price)) * (1 - total_fees) - investment
         net_profits['BNB'] = ((investment / Decimal(bnb_usdc_price)) * Decimal(btc_usdc_price)) * (1 - total_fees) - investment
         net_profits['XRP'] = ((investment / Decimal(xrp_usdc_price)) * Decimal(btc_usdc_price)) * (1 - total_fees) - investment
-        net_profits['SUI'] = ((investment / Decimal(sui_usdc_price)) * Decimal(btc_usdc_price)) * (1 - total_fees) - investment
-        net_profits['PEPE'] = ((investment / Decimal(pepe_usdc_price)) * Decimal(btc_usdc_price)) * (1 - total_fees) - investment
+        net_profits['DOGE'] = ((investment / Decimal(sui_usdc_price)) * Decimal(btc_usdc_price)) * (1 - total_fees) - investment
+        net_profits['ADA'] = ((investment / Decimal(ada_usdc_price)) * Decimal(btc_usdc_price)) * (1 - total_fees) - investment
 
         # Trouver la paire la plus rentable
         best_pair = max(net_profits, key=net_profits.get)
@@ -643,7 +643,7 @@ def check_order_filled(order):
 def execute_if_profitable():
     try:
         # Liste des paires à surveiller
-        pairs_to_monitor = ['ETH/USDC', 'SOL/USDC', 'ARB/USDC', 'MATIC/USDC', 'BNB/USDC', 'XRP/USDC', 'SUI/USDC', 'PEPE/USDC']
+        pairs_to_monitor = ['ETH/USDC', 'SOL/USDC', 'ARB/USDC', 'MATIC/USDC', 'BNB/USDC', 'XRP/USDC', 'doge/USDC', 'ada/USDC']
 
         # Stocker les profits pour chaque paire et chaque stratégie
         net_profits = {}
