@@ -128,55 +128,80 @@ def get_binance_fees():
 fees = get_binance_fees()  # Récupérer les frais réels ou appliquer des frais fixes
     
 # Simuler Achat-Vente-Achat
-def simulate_buy_sell_buy():
+def simulate_buy_sell_buy(pair):
     try:
-        eth_usdc_price = fetch_current_ticker_price('ETH/USDC')
-        eth_btc_price = fetch_current_ticker_price('ETH/BTC')
+        ticker_price_1 = fetch_current_ticker_price(pair)  # Le prix de la paire surveillée
+        eth_btc_price = fetch_current_ticker_price('ETH/BTC')  # Exemple ETH/BTC pour arbitrage triangulaire
         btc_usdc_price = fetch_current_ticker_price('BTC/USDC')
 
-        eth_amount = initial_investment / Decimal(eth_usdc_price)
-        btc_amount = eth_amount * Decimal(eth_btc_price)
-        final_eth_amount = btc_amount / Decimal(btc_usdc_price)
+        # Assurer que les prix sont bien récupérés
+        if ticker_price_1 is None or eth_btc_price is None or btc_usdc_price is None:
+            logging.error(f"Erreur dans la récupération des prix pour la paire {pair}.")
+            return None
 
-        logging.info(f"Simulation Achat-Vente-Achat : Final ETH amount: {final_eth_amount}")
-        return final_eth_amount  # Retourne le montant final en ETH
+        # Calcul du montant en ETH pour un investissement initial de 40 USDC
+        eth_amount = initial_investment / Decimal(ticker_price_1)
+        
+        # Convertir l'ETH en BTC, puis en USDC
+        btc_amount = eth_amount * Decimal(eth_btc_price)
+        final_usdc_amount = btc_amount / Decimal(btc_usdc_price)
+
+        logging.info(f"Simulation Achat-Vente-Achat pour {pair} : Final USDC amount: {final_usdc_amount}")
+        return final_usdc_amount  # Retourne le montant final en USDC
     except Exception as e:
-        logging.error(f"Erreur lors de la simulation Achat-Vente-Achat : {str(e)}")
+        logging.error(f"Erreur lors de la simulation Achat-Vente-Achat pour {pair}: {str(e)}")
         return None
 
 # Simuler Achat-Achat-Vente
-def simulate_buy_buy_sell():
+def simulate_buy_buy_sell(pair):
     try:
-        eth_usdc_price = fetch_current_ticker_price('ETH/USDC')
-        eth_btc_price = fetch_current_ticker_price('ETH/BTC')
+        ticker_price_1 = fetch_current_ticker_price(pair)  # Le prix de la paire surveillée
+        eth_btc_price = fetch_current_ticker_price('ETH/BTC')  # Exemple ETH/BTC pour arbitrage triangulaire
         btc_usdc_price = fetch_current_ticker_price('BTC/USDC')
 
-        eth_amount = initial_investment / Decimal(eth_usdc_price)
+        # Assurer que les prix sont bien récupérés
+        if ticker_price_1 is None or eth_btc_price is None or btc_usdc_price is None:
+            logging.error(f"Erreur dans la récupération des prix pour la paire {pair}.")
+            return None
+
+        # Calcul du montant en ETH pour un investissement initial de 40 USDC
+        eth_amount = initial_investment / Decimal(ticker_price_1)
+        
+        # Convertir l'ETH en BTC, puis en USDC
         btc_amount = eth_amount * Decimal(eth_btc_price)
         final_usdc_amount = btc_amount * Decimal(btc_usdc_price)
 
-        logging.info(f"Simulation Achat-Achat-Vente : Final USDC amount: {final_usdc_amount}")
+        logging.info(f"Simulation Achat-Achat-Vente pour {pair} : Final USDC amount: {final_usdc_amount}")
         return final_usdc_amount
     except Exception as e:
-        logging.error(f"Erreur lors de la simulation Achat-Achat-Vente : {str(e)}")
+        logging.error(f"Erreur lors de la simulation Achat-Achat-Vente pour {pair}: {str(e)}")
         return None
 
 # Simuler Achat-Vente-Vente
-def simulate_buy_sell_sell():
+def simulate_buy_sell_sell(pair):
     try:
-        eth_usdc_price = fetch_current_ticker_price('ETH/USDC')
-        eth_btc_price = fetch_current_ticker_price('ETH/BTC')
+        ticker_price_1 = fetch_current_ticker_price(pair)  # Le prix de la paire surveillée
+        eth_btc_price = fetch_current_ticker_price('ETH/BTC')  # Exemple ETH/BTC pour arbitrage triangulaire
         btc_usdc_price = fetch_current_ticker_price('BTC/USDC')
 
-        eth_amount = initial_investment / Decimal(eth_usdc_price)
+        # Assurer que les prix sont bien récupérés
+        if ticker_price_1 is None or eth_btc_price is None or btc_usdc_price is None:
+            logging.error(f"Erreur dans la récupération des prix pour la paire {pair}.")
+            return None
+        
+        # Calcul du montant en ETH pour un investissement initial de 40 USDC
+        eth_amount = initial_investment / Decimal(ticker_price_1)
+        
+        # Convertir l'ETH en BTC, puis en USDC
         btc_amount = eth_amount * Decimal(eth_btc_price)
         final_usdc_amount = btc_amount * Decimal(btc_usdc_price)
 
-        logging.info(f"Simulation Achat-Vente-Vente : Final USDC amount: {final_usdc_amount}")
+        logging.info(f"Simulation Achat-Vente-Vente pour {pair} : Final USDC amount: {final_usdc_amount}")
         return final_usdc_amount
     except Exception as e:
-        logging.error(f"Erreur lors de la simulation Achat-Vente-Vente : {str(e)}")
+        logging.error(f"Erreur lors de la simulation Achat-Vente-Vente pour {pair}: {str(e)}")
         return None
+
 
 # Fonction pour exécuter les ordres d'achat et vente
 def execute_order(symbol, side, amount):
@@ -306,11 +331,11 @@ def find_arbitrage_opportunity():
 
         # Comparaison avec le min_profit attendu
         if best_profit > min_profit:
-            logging.info(f"Arbitrage trouvé avec la paire {best_pair}/USDC ! Profit potentiel après frais : {best_profit}")
-            send_telegram_message(f"Arbitrage trouvé avec la paire {best_pair}/USDC ! Profit potentiel : {best_profit}")
+            logging.info(f"Arbitrage trouvé avec la paire {best_pair}/USDC ! Profit potentiel après frais : {best_profit} USDC")
+            send_telegram_message(f"Arbitrage trouvé avec la paire {best_pair}/USDC ! Profit potentiel : {best_profit} USDC")
             return True
         else:
-            logging.info(f"Pas d'opportunité rentable. Meilleur profit potentiel ({best_pair}/USDC) : {best_profit}")
+            logging.info(f"Pas d'opportunité rentable. Meilleur profit potentiel ({best_pair}/USDC) : {best_profit} USDC")
             return False
     except Exception as e:
         logging.error(f"Erreur lors du calcul de l'arbitrage: {str(e)}")
@@ -374,18 +399,19 @@ def execute_if_profitable():
         # Liste des paires à surveiller
         pairs_to_monitor = ['ETH/USDC', 'SOL/USDC', 'ARB/USDC', 'MATIC/USDC', 'BNB/USDC', 'XRP/USDC', 'SUI/USDC', 'PEPE/USDC']
 
-        # Stocker les profits pour chaque paire
+        # Stocker les profits pour chaque paire et chaque stratégie
         net_profits = {}
 
         # Boucle pour simuler et calculer les profits pour chaque paire
         for pair in pairs_to_monitor:
+            # Simuler les trois stratégies (Achat-Vente-Achat, Achat-Achat-Vente, et Achat-Vente-Vente)
             buy_sell_buy_profit = simulate_buy_sell_buy(pair)
             buy_buy_sell_profit = simulate_buy_buy_sell(pair)
             buy_sell_sell_profit = simulate_buy_sell_sell(pair)
 
             # Vérifier que toutes les simulations ont bien fonctionné pour cette paire
-            if buy_sell_buy_profit and buy_buy_sell_profit and buy_sell_sell_profit:
-                # Calculer les profits pour chaque stratégie
+            if buy_sell_buy_profit is not None and buy_buy_sell_profit is not None and buy_sell_sell_profit is not None:
+                # Calculer les profits pour chaque stratégie avec les frais inclus
                 profit_loss_buy_sell_buy = check_profit_loss(buy_sell_buy_profit, initial_investment, fees, min_profit)
                 profit_loss_buy_buy_sell = check_profit_loss(buy_buy_sell_profit, initial_investment, fees, min_profit)
                 profit_loss_buy_sell_sell = check_profit_loss(buy_sell_sell_profit, initial_investment, fees, min_profit)
@@ -403,10 +429,11 @@ def execute_if_profitable():
         # Trouver la meilleure opportunité
         best_pair = None
         best_strategy = None
-        best_profit = 0
+        best_profit = Decimal('0')  # Utiliser Decimal pour les comparaisons précises des montants
 
         for pair, profits in net_profits.items():
             for strategy, profit in profits.items():
+                # Sélectionner la meilleure stratégie qui dépasse le seuil de profit minimum
                 if profit > best_profit and profit > min_profit_threshold:
                     best_profit = profit
                     best_pair = pair
@@ -416,7 +443,7 @@ def execute_if_profitable():
         if best_pair and best_strategy:
             logging.info(f"Exécution de la stratégie {best_strategy} pour la paire {best_pair} avec un profit de : {best_profit}")
             send_telegram_message(f"Arbitrage trouvé : {best_pair} - Stratégie {best_strategy} avec un profit de : {best_profit}")
-            
+
             # Exécuter les ordres réels pour cette stratégie et paire
             if best_strategy == 'buy_sell_buy':
                 execute_arbitrage_orders(best_pair, 'buy_sell_buy')
