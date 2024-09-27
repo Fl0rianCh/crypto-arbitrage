@@ -126,27 +126,60 @@ def get_binance_fees():
         return DEFAULT_FEES  # Utiliser les frais fixes par défaut en cas d'échec
 
 fees = get_binance_fees()  # Récupérer les frais réels ou appliquer des frais fixes
+
+def get_min_order_size(symbol):
+    binance = ensure_binance_connection()
+    if binance:
+        try:
+            market = binance.market(symbol)
+            return market['limits']['amount']['min']  # Taille minimale d'ordre pour la paire
+        except Exception as e:
+            logging.error(f"Erreur lors de la récupération de la taille minimale d'ordre pour {symbol}: {str(e)}")
+            return None
+    else:
+        logging.error(f"Impossible de se connecter à Binance pour récupérer les informations sur {symbol}.")
+        return None
     
 # Simuler Achat-Vente-Achat
 def simulate_buy_sell_buy(pair):
     try:
-        ticker_price_1 = fetch_current_ticker_price(pair)  
-        eth_btc_price = fetch_current_ticker_price('ETH/BTC')  
-        btc_usdc_price = fetch_current_ticker_price('BTC/USDC')
+        # Récupérer le prix de la paire USDC/Crypto (ex: PEPE/USDC, BNB/USDC)
+        ticker_price_1 = fetch_current_ticker_price(pair)
+        crypto_btc_pair = pair.split('/')[0] + '/BTC'  
+        crypto_eth_pair = pair.split('/')[0] + '/ETH'  
 
-        # Vérifiez les prix
-        if ticker_price_1 is None or eth_btc_price is None or btc_usdc_price is None:
-            logging.error(f"Erreur dans la récupération des prix pour la paire {pair}.")
+        # Vérifier si les paires BTC et ETH sont disponibles
+        crypto_btc_price = fetch_current_ticker_price(crypto_btc_pair)
+        crypto_eth_price = fetch_current_ticker_price(crypto_eth_pair)
+
+        # Choisir la deuxième crypto en fonction de la disponibilité
+        if crypto_btc_price:
+            intermediate_pair = 'BTC'
+            intermediate_price = crypto_btc_price
+            final_usdc_price = fetch_current_ticker_price('BTC/USDC')
+        elif crypto_eth_price:
+            intermediate_pair = 'ETH'
+            intermediate_price = crypto_eth_price
+            final_usdc_price = fetch_current_ticker_price('ETH/USDC')
+        else:
+            logging.error(f"Aucune paire BTC ou ETH disponible pour {pair}")
             return None
 
-        # Calcul du montant en ETH pour 40 USDC
-        eth_amount = initial_investment / Decimal(ticker_price_1)
-        
-        # Convertir l'ETH en BTC, puis en USDC, tout en appliquant les frais à chaque étape
-        btc_amount = eth_amount * Decimal(eth_btc_price) * (1 - fees['binance'])
-        final_usdc_amount = btc_amount * Decimal(btc_usdc_price) * (1 - fees['binance'])
+        # 1. Acheter la crypto avec 40 USDC
+        crypto_amount = initial_investment / Decimal(ticker_price_1)
 
-        logging.info(f"Simulation Achat-Vente-Achat pour {pair} : Final USDC amount: {final_usdc_amount}")
+        # 2. Vendre la crypto contre BTC ou ETH
+        intermediate_amount = crypto_amount * Decimal(intermediate_price) * (1 - fees['binance'])
+
+        # 3. Vendre BTC/ETH contre USDC
+        final_usdc_amount = intermediate_amount * Decimal(final_usdc_price) * (1 - fees['binance'])
+
+        # Vérification du montant final en USDC
+        if final_usdc_amount < 0.01 or final_usdc_amount > initial_investment * 100:
+            logging.error(f"Montant final en USDC non réaliste : {final_usdc_amount}")
+            return None
+
+        logging.info(f"Simulation Achat-Vente-Achat pour {pair} via {intermediate_pair} : Montant final en USDC : {final_usdc_amount}")
         return final_usdc_amount
     except Exception as e:
         logging.error(f"Erreur lors de la simulation Achat-Vente-Achat pour {pair}: {str(e)}")
@@ -155,23 +188,42 @@ def simulate_buy_sell_buy(pair):
 # Simuler Achat-Achat-Vente
 def simulate_buy_buy_sell(pair):
     try:
-        ticker_price_1 = fetch_current_ticker_price(pair)  # Le prix de la paire surveillée
-        eth_btc_price = fetch_current_ticker_price('ETH/BTC')  # Exemple ETH/BTC pour arbitrage triangulaire
-        btc_usdc_price = fetch_current_ticker_price('BTC/USDC')
+        ticker_price_1 = fetch_current_ticker_price(pair)
+        crypto_btc_pair = pair.split('/')[0] + '/BTC'  
+        crypto_eth_pair = pair.split('/')[0] + '/ETH'  
 
-        # Assurer que les prix sont bien récupérés
-        if ticker_price_1 is None or eth_btc_price is None or btc_usdc_price is None:
-            logging.error(f"Erreur dans la récupération des prix pour la paire {pair}.")
+        # Vérifier si les paires BTC et ETH sont disponibles
+        crypto_btc_price = fetch_current_ticker_price(crypto_btc_pair)
+        crypto_eth_price = fetch_current_ticker_price(crypto_eth_pair)
+
+        # Choisir la deuxième crypto
+        if crypto_btc_price:
+            intermediate_pair = 'BTC'
+            intermediate_price = crypto_btc_price
+            final_usdc_price = fetch_current_ticker_price('BTC/USDC')
+        elif crypto_eth_price:
+            intermediate_pair = 'ETH'
+            intermediate_price = crypto_eth_price
+            final_usdc_price = fetch_current_ticker_price('ETH/USDC')
+        else:
+            logging.error(f"Aucune paire BTC ou ETH disponible pour {pair}")
             return None
 
-        # Calcul du montant en ETH pour un investissement initial de 40 USDC
-        eth_amount = initial_investment / Decimal(ticker_price_1)
-        
-        # Convertir l'ETH en BTC, puis en USDC
-        btc_amount = eth_amount * Decimal(eth_btc_price)
-        final_usdc_amount = btc_amount * Decimal(btc_usdc_price)
+        # 1. Acheter la crypto avec 40 USDC
+        crypto_amount = initial_investment / Decimal(ticker_price_1)
 
-        logging.info(f"Simulation Achat-Achat-Vente pour {pair} : Final USDC amount: {final_usdc_amount}")
+        # 2. Vendre la crypto contre BTC ou ETH
+        intermediate_amount = crypto_amount * Decimal(intermediate_price) * (1 - fees['binance'])
+
+        # 3. Vendre BTC/ETH contre USDC
+        final_usdc_amount = intermediate_amount * Decimal(final_usdc_price) * (1 - fees['binance'])
+
+        # Vérification du montant final en USDC
+        if final_usdc_amount < 0.01 or final_usdc_amount > initial_investment * 100:
+            logging.error(f"Montant final en USDC non réaliste : {final_usdc_amount}")
+            return None
+
+        logging.info(f"Simulation Achat-Achat-Vente pour {pair} via {intermediate_pair} : Montant final en USDC : {final_usdc_amount}")
         return final_usdc_amount
     except Exception as e:
         logging.error(f"Erreur lors de la simulation Achat-Achat-Vente pour {pair}: {str(e)}")
@@ -180,45 +232,85 @@ def simulate_buy_buy_sell(pair):
 # Simuler Achat-Vente-Vente
 def simulate_buy_sell_sell(pair):
     try:
-        ticker_price_1 = fetch_current_ticker_price(pair)  # Le prix de la paire surveillée
-        eth_btc_price = fetch_current_ticker_price('ETH/BTC')  # Exemple ETH/BTC pour arbitrage triangulaire
-        btc_usdc_price = fetch_current_ticker_price('BTC/USDC')
+        ticker_price_1 = fetch_current_ticker_price(pair)
+        crypto_btc_pair = pair.split('/')[0] + '/BTC'  
+        crypto_eth_pair = pair.split('/')[0] + '/ETH'  
 
-        # Assurer que les prix sont bien récupérés
-        if ticker_price_1 is None or eth_btc_price is None or btc_usdc_price is None:
-            logging.error(f"Erreur dans la récupération des prix pour la paire {pair}.")
+        # Vérifier si les paires BTC et ETH sont disponibles
+        crypto_btc_price = fetch_current_ticker_price(crypto_btc_pair)
+        crypto_eth_price = fetch_current_ticker_price(crypto_eth_pair)
+
+        # Choisir la deuxième crypto
+        if crypto_btc_price:
+            intermediate_pair = 'BTC'
+            intermediate_price = crypto_btc_price
+            final_usdc_price = fetch_current_ticker_price('BTC/USDC')
+        elif crypto_eth_price:
+            intermediate_pair = 'ETH'
+            intermediate_price = crypto_eth_price
+            final_usdc_price = fetch_current_ticker_price('ETH/USDC')
+        else:
+            logging.error(f"Aucune paire BTC ou ETH disponible pour {pair}")
             return None
-        
-        # Calcul du montant en ETH pour un investissement initial de 40 USDC
-        eth_amount = initial_investment / Decimal(ticker_price_1)
-        
-        # Convertir l'ETH en BTC, puis en USDC
-        btc_amount = eth_amount * Decimal(eth_btc_price)
-        final_usdc_amount = btc_amount * Decimal(btc_usdc_price)
 
-        logging.info(f"Simulation Achat-Vente-Vente pour {pair} : Final USDC amount: {final_usdc_amount}")
+        # 1. Acheter la crypto avec 40 USDC
+        crypto_amount = initial_investment / Decimal(ticker_price_1)
+
+        # 2. Vendre la crypto contre BTC ou ETH
+        intermediate_amount = crypto_amount * Decimal(intermediate_price) * (1 - fees['binance'])
+
+        # 3. Vendre BTC/ETH contre USDC
+        final_usdc_amount = intermediate_amount * Decimal(final_usdc_price) * (1 - fees['binance'])
+
+        # Vérification du montant final en USDC
+        if final_usdc_amount < 0.01 or final_usdc_amount > initial_investment * 100:
+            logging.error(f"Montant final en USDC non réaliste : {final_usdc_amount}")
+            return None
+
+        logging.info(f"Simulation Achat-Vente-Vente pour {pair} via {intermediate_pair} : Montant final en USDC : {final_usdc_amount}")
         return final_usdc_amount
     except Exception as e:
         logging.error(f"Erreur lors de la simulation Achat-Vente-Vente pour {pair}: {str(e)}")
         return None
-
 
 # Fonction pour exécuter les ordres d'achat et vente
 def execute_order(symbol, side, amount):
     binance = ensure_binance_connection()  # Vérifier et reconnecter si nécessaire
     if binance:
         try:
+            # Récupérer la taille minimale d'ordre pour cette paire
+            min_order_size = get_min_order_size(symbol)
+            if min_order_size is None or amount < min_order_size:
+                logging.error(f"Montant {amount} pour {symbol} inférieur à la taille minimale {min_order_size}.")
+                send_telegram_message(f"Erreur : montant {amount} pour {symbol} inférieur à la taille minimale de {min_order_size}.")
+                return None
+
+            # Exécuter l'ordre en fonction de l'action (achat ou vente)
             if side == 'buy':
+                logging.info(f"Tentative d'achat de {amount} {symbol}")
                 order = binance.create_market_buy_order(symbol, amount)
             else:
+                logging.info(f"Tentative de vente de {amount} {symbol}")
                 order = binance.create_market_sell_order(symbol, amount)
-            return order
+            
+            # Vérifier si l'ordre est rempli
+            if check_order_filled(order):
+                logging.info(f"Ordre {side} exécuté avec succès pour {symbol}: {amount}")
+                send_telegram_message(f"Succès de l'ordre {side} pour {symbol}: {amount} {symbol} exécutés.")
+            else:
+                logging.warning(f"L'ordre {side} pour {symbol} n'a pas été totalement rempli.")
+                send_telegram_message(f"L'ordre {side} pour {symbol} n'a pas été totalement rempli.")
+            
+            return order  # Retourner l'ordre exécuté
         except Exception as e:
+            # Log d'erreur et notification en cas de problème lors de l'exécution de l'ordre
             logging.error(f"Erreur lors de l'exécution de l'ordre {side} pour {symbol}: {str(e)}")
             send_telegram_message(f"Erreur lors de l'exécution de l'ordre {side} pour {symbol}: {str(e)}")
             return None
     else:
+        # Si la connexion à Binance échoue, on log et on envoie une notification Telegram
         logging.error(f"Impossible de se connecter à Binance pour exécuter un ordre sur {symbol}.")
+        send_telegram_message(f"Erreur de connexion : Impossible de se connecter à Binance pour exécuter un ordre sur {symbol}.")
         return None
         
 def execute_order_with_retry(symbol, side, amount, retries=3):
@@ -240,71 +332,88 @@ def check_order_filled(order):
 # Fonction pour exécuter les trois ordres en simultané et vérifier qu'ils sont remplis
 def execute_arbitrage_orders(pair, strategy):
     try:
-        # Récupérer les prix et calculer les montants de conversion pour la stratégie choisie
-        eth_usdc_price = fetch_current_ticker_price('ETH/USDC')
-        eth_amount = initial_investment / Decimal(eth_usdc_price)
+        # Récupérer les prix de la paire USDC/Crypto
+        crypto_usdc_price = fetch_current_ticker_price(pair)
+        crypto_amount = initial_investment / Decimal(crypto_usdc_price)
 
+        # Vérifier si les paires intermédiaires BTC ou ETH sont disponibles
+        crypto_btc_pair = pair.split('/')[0] + '/BTC'
+        crypto_eth_pair = pair.split('/')[0] + '/ETH'
+
+        crypto_btc_price = fetch_current_ticker_price(crypto_btc_pair)
+        crypto_eth_price = fetch_current_ticker_price(crypto_eth_pair)
+
+        # Choisir entre BTC ou ETH comme crypto intermédiaire
+        if crypto_btc_price:
+            intermediate_pair = 'BTC'
+            intermediate_price = crypto_btc_price
+            final_usdc_price = fetch_current_ticker_price('BTC/USDC')
+        elif crypto_eth_price:
+            intermediate_pair = 'ETH'
+            intermediate_price = crypto_eth_price
+            final_usdc_price = fetch_current_ticker_price('ETH/USDC')
+        else:
+            logging.error(f"Aucune paire BTC ou ETH disponible pour {pair}")
+            return None
+
+        # Gérer les stratégies ici
         if strategy == 'buy_sell_buy':
-            order1 = execute_order_with_retry(pair, 'buy', eth_amount)
+            # Acheter crypto avec USDC
+            order1 = execute_order_with_retry(pair, 'buy', crypto_amount)
             if not check_order_filled(order1):
-                logging.error("L'ordre 1 (buy) n'a pas été rempli, arrêt de l'arbitrage.")
                 return None
 
-            # Vendre ETH pour BTC
-            order2 = execute_order_with_retry('ETH/BTC', 'sell', eth_amount)
+            # Vendre crypto pour BTC ou ETH
+            order2 = execute_order_with_retry(f'{pair.split("/")[0]}/{intermediate_pair}', 'sell', crypto_amount)
             if not check_order_filled(order2):
-                logging.error("L'ordre 2 (sell ETH/BTC) n'a pas été rempli, arrêt de l'arbitrage.")
                 return None
 
-            btc_amount = eth_amount * Decimal(fetch_current_ticker_price('ETH/BTC'))
-            order3 = execute_order_with_retry('BTC/USDC', 'sell', btc_amount)
+            intermediate_amount = crypto_amount * Decimal(intermediate_price)
+
+            # Vendre BTC/ETH pour USDC
+            order3 = execute_order_with_retry(f'{intermediate_pair}/USDC', 'sell', intermediate_amount)
             if not check_order_filled(order3):
-                logging.error("L'ordre 3 (sell BTC/USDC) n'a pas été rempli, arrêt de l'arbitrage.")
                 return None
 
         elif strategy == 'buy_buy_sell':
-            # Acheter ETH avec USDC
-            order1 = execute_order_with_retry(pair, 'buy', eth_amount)
+            # Acheter crypto avec USDC
+            order1 = execute_order_with_retry(pair, 'buy', crypto_amount)
             if not check_order_filled(order1):
-                logging.error("L'ordre 1 (buy ETH/USDC) n'a pas été rempli, arrêt de l'arbitrage.")
                 return None
 
-            # Vendre ETH pour BTC
-            order2 = execute_order_with_retry('ETH/BTC', 'sell', eth_amount)
+            # Acheter BTC ou ETH avec la crypto
+            order2 = execute_order_with_retry(f'{pair.split("/")[0]}/{intermediate_pair}', 'buy', crypto_amount)
             if not check_order_filled(order2):
-                logging.error("L'ordre 2 (sell ETH/BTC) n'a pas été rempli, arrêt de l'arbitrage.")
                 return None
 
-            # Convertir le BTC en USDC
-            btc_amount = eth_amount * Decimal(fetch_current_ticker_price('ETH/BTC'))
-            order3 = execute_order_with_retry('BTC/USDC', 'sell', btc_amount)
+            intermediate_amount = crypto_amount * Decimal(intermediate_price)
+
+            # Vendre BTC/ETH pour USDC
+            order3 = execute_order_with_retry(f'{intermediate_pair}/USDC', 'sell', intermediate_amount)
             if not check_order_filled(order3):
-                logging.error("L'ordre 3 (sell BTC/USDC) n'a pas été rempli, arrêt de l'arbitrage.")
                 return None
 
-        elif strategy == 'buy_sell_sell':
-            # Acheter ETH avec USDC
-            order1 = execute_order_with_retry(pair, 'buy', eth_amount)
+        elif strategy == 'sell_sell_buy':
+            # Vendre crypto contre USDC
+            order1 = execute_order_with_retry(pair, 'sell', crypto_amount)
             if not check_order_filled(order1):
-                logging.error("L'ordre 1 (buy ETH/USDC) n'a pas été rempli, arrêt de l'arbitrage.")
                 return None
 
-            # Vendre ETH pour BTC
-            order2 = execute_order_with_retry('ETH/BTC', 'sell', eth_amount)
+            # Vendre BTC ou ETH contre une autre crypto
+            order2 = execute_order_with_retry(f'{pair.split("/")[0]}/{intermediate_pair}', 'sell', crypto_amount)
             if not check_order_filled(order2):
-                logging.error("L'ordre 2 (sell ETH/BTC) n'a pas été rempli, arrêt de l'arbitrage.")
                 return None
 
-            btc_amount = eth_amount * Decimal(fetch_current_ticker_price('ETH/BTC'))
-            # Vendre BTC pour USDC
-            order3 = execute_order_with_retry('BTC/USDC', 'sell', btc_amount)
+            intermediate_amount = crypto_amount * Decimal(intermediate_price)
+
+            # Acheter crypto contre USDC
+            order3 = execute_order_with_retry(f'{intermediate_pair}/USDC', 'buy', intermediate_amount)
             if not check_order_filled(order3):
-                logging.error("L'ordre 3 (sell BTC/USDC) n'a pas été rempli, arrêt de l'arbitrage.")
                 return None
 
         # Calculer le montant final en USDC après les transactions
-        final_usdc_amount = btc_amount * Decimal(fetch_current_ticker_price('BTC/USDC'))
-        logging.info(f"Ordres d'arbitrage exécutés avec succès pour {pair} avec la stratégie {strategy}. Montant final en USDC : {final_usdc_amount}")
+        final_usdc_amount = intermediate_amount * Decimal(final_usdc_price)
+        logging.info(f"Ordres d'arbitrage exécutés avec succès pour {pair} via {intermediate_pair}. Montant final en USDC : {final_usdc_amount}")
         return final_usdc_amount
 
     except Exception as e:
