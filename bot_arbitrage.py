@@ -549,7 +549,7 @@ def find_arbitrage_opportunity():
         # Vérifier que tous les prix sont bien récupérés
         if None in [usdc_usdt_price, btc_usdc_price, eth_usdc_price, sol_usdc_price, 
                     arb_usdc_price, matic_usdc_price, bnb_usdc_price, xrp_usdc_price, 
-                    sui_usdc_price, pepe_usdc_price]:
+                    doge_usdc_price, ada_usdc_price]:
             logging.error("Erreur dans la récupération des prix, impossible de calculer l'arbitrage.")
             return False
 
@@ -568,7 +568,7 @@ def find_arbitrage_opportunity():
         net_profits['MATIC'] = ((investment / Decimal(matic_usdc_price)) * Decimal(btc_usdc_price)) * (1 - total_fees) - investment
         net_profits['BNB'] = ((investment / Decimal(bnb_usdc_price)) * Decimal(btc_usdc_price)) * (1 - total_fees) - investment
         net_profits['XRP'] = ((investment / Decimal(xrp_usdc_price)) * Decimal(btc_usdc_price)) * (1 - total_fees) - investment
-        net_profits['DOGE'] = ((investment / Decimal(sui_usdc_price)) * Decimal(btc_usdc_price)) * (1 - total_fees) - investment
+        net_profits['DOGE'] = ((investment / Decimal(doge_usdc_price)) * Decimal(btc_usdc_price)) * (1 - total_fees) - investment
         net_profits['ADA'] = ((investment / Decimal(ada_usdc_price)) * Decimal(btc_usdc_price)) * (1 - total_fees) - investment
 
         # Trouver la paire la plus rentable
