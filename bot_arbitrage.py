@@ -130,24 +130,24 @@ fees = get_binance_fees()  # Récupérer les frais réels ou appliquer des frais
 # Simuler Achat-Vente-Achat
 def simulate_buy_sell_buy(pair):
     try:
-        ticker_price_1 = fetch_current_ticker_price(pair)  # Le prix de la paire surveillée
-        eth_btc_price = fetch_current_ticker_price('ETH/BTC')  # Exemple ETH/BTC pour arbitrage triangulaire
+        ticker_price_1 = fetch_current_ticker_price(pair)  
+        eth_btc_price = fetch_current_ticker_price('ETH/BTC')  
         btc_usdc_price = fetch_current_ticker_price('BTC/USDC')
 
-        # Assurer que les prix sont bien récupérés
+        # Vérifiez les prix
         if ticker_price_1 is None or eth_btc_price is None or btc_usdc_price is None:
             logging.error(f"Erreur dans la récupération des prix pour la paire {pair}.")
             return None
 
-        # Calcul du montant en ETH pour un investissement initial de 40 USDC
+        # Calcul du montant en ETH pour 40 USDC
         eth_amount = initial_investment / Decimal(ticker_price_1)
         
-        # Convertir l'ETH en BTC, puis en USDC
-        btc_amount = eth_amount * Decimal(eth_btc_price)
-        final_usdc_amount = btc_amount / Decimal(btc_usdc_price)
+        # Convertir l'ETH en BTC, puis en USDC, tout en appliquant les frais à chaque étape
+        btc_amount = eth_amount * Decimal(eth_btc_price) * (1 - fees['binance'])
+        final_usdc_amount = btc_amount * Decimal(btc_usdc_price) * (1 - fees['binance'])
 
         logging.info(f"Simulation Achat-Vente-Achat pour {pair} : Final USDC amount: {final_usdc_amount}")
-        return final_usdc_amount  # Retourne le montant final en USDC
+        return final_usdc_amount
     except Exception as e:
         logging.error(f"Erreur lors de la simulation Achat-Vente-Achat pour {pair}: {str(e)}")
         return None
@@ -238,34 +238,78 @@ def check_order_filled(order):
     return order and order['status'] == 'closed'
 
 # Fonction pour exécuter les trois ordres en simultané et vérifier qu'ils sont remplis
-def execute_arbitrage_orders():
+def execute_arbitrage_orders(pair, strategy):
     try:
+        # Récupérer les prix et calculer les montants de conversion pour la stratégie choisie
         eth_usdc_price = fetch_current_ticker_price('ETH/USDC')
         eth_amount = initial_investment / Decimal(eth_usdc_price)
-        
-        # Exécuter les ordres
-        order1 = execute_order_with_retry('ETH/USDC', 'buy', eth_amount)
-        if not check_order_filled(order1):
-            logging.error("L'ordre 1 n'a pas été rempli, arrêt de l'arbitrage.")
-            return None
-        
-        order2 = execute_order_with_retry('ETH/BTC', 'sell', eth_amount)
-        if not check_order_filled(order2):
-            logging.error("L'ordre 2 n'a pas été rempli, arrêt de l'arbitrage.")
-            return None
-        
-        btc_amount = eth_amount * Decimal(fetch_current_ticker_price('ETH/BTC'))
-        order3 = execute_order_with_retry('BTC/USDC', 'sell', btc_amount)
-        if not check_order_filled(order3):
-            logging.error("L'ordre 3 n'a pas été rempli, arrêt de l'arbitrage.")
-            return None
-        
-        # Vérifier que tous les ordres sont remplis
+
+        if strategy == 'buy_sell_buy':
+            order1 = execute_order_with_retry(pair, 'buy', eth_amount)
+            if not check_order_filled(order1):
+                logging.error("L'ordre 1 (buy) n'a pas été rempli, arrêt de l'arbitrage.")
+                return None
+
+            # Vendre ETH pour BTC
+            order2 = execute_order_with_retry('ETH/BTC', 'sell', eth_amount)
+            if not check_order_filled(order2):
+                logging.error("L'ordre 2 (sell ETH/BTC) n'a pas été rempli, arrêt de l'arbitrage.")
+                return None
+
+            btc_amount = eth_amount * Decimal(fetch_current_ticker_price('ETH/BTC'))
+            order3 = execute_order_with_retry('BTC/USDC', 'sell', btc_amount)
+            if not check_order_filled(order3):
+                logging.error("L'ordre 3 (sell BTC/USDC) n'a pas été rempli, arrêt de l'arbitrage.")
+                return None
+
+        elif strategy == 'buy_buy_sell':
+            # Acheter ETH avec USDC
+            order1 = execute_order_with_retry(pair, 'buy', eth_amount)
+            if not check_order_filled(order1):
+                logging.error("L'ordre 1 (buy ETH/USDC) n'a pas été rempli, arrêt de l'arbitrage.")
+                return None
+
+            # Vendre ETH pour BTC
+            order2 = execute_order_with_retry('ETH/BTC', 'sell', eth_amount)
+            if not check_order_filled(order2):
+                logging.error("L'ordre 2 (sell ETH/BTC) n'a pas été rempli, arrêt de l'arbitrage.")
+                return None
+
+            # Convertir le BTC en USDC
+            btc_amount = eth_amount * Decimal(fetch_current_ticker_price('ETH/BTC'))
+            order3 = execute_order_with_retry('BTC/USDC', 'sell', btc_amount)
+            if not check_order_filled(order3):
+                logging.error("L'ordre 3 (sell BTC/USDC) n'a pas été rempli, arrêt de l'arbitrage.")
+                return None
+
+        elif strategy == 'buy_sell_sell':
+            # Acheter ETH avec USDC
+            order1 = execute_order_with_retry(pair, 'buy', eth_amount)
+            if not check_order_filled(order1):
+                logging.error("L'ordre 1 (buy ETH/USDC) n'a pas été rempli, arrêt de l'arbitrage.")
+                return None
+
+            # Vendre ETH pour BTC
+            order2 = execute_order_with_retry('ETH/BTC', 'sell', eth_amount)
+            if not check_order_filled(order2):
+                logging.error("L'ordre 2 (sell ETH/BTC) n'a pas été rempli, arrêt de l'arbitrage.")
+                return None
+
+            btc_amount = eth_amount * Decimal(fetch_current_ticker_price('ETH/BTC'))
+            # Vendre BTC pour USDC
+            order3 = execute_order_with_retry('BTC/USDC', 'sell', btc_amount)
+            if not check_order_filled(order3):
+                logging.error("L'ordre 3 (sell BTC/USDC) n'a pas été rempli, arrêt de l'arbitrage.")
+                return None
+
+        # Calculer le montant final en USDC après les transactions
         final_usdc_amount = btc_amount * Decimal(fetch_current_ticker_price('BTC/USDC'))
+        logging.info(f"Ordres d'arbitrage exécutés avec succès pour {pair} avec la stratégie {strategy}. Montant final en USDC : {final_usdc_amount}")
         return final_usdc_amount
+
     except Exception as e:
-        logging.error(f"Erreur lors de l'exécution des ordres d'arbitrage: {str(e)}")
-        send_telegram_message(f"Erreur lors de l'exécution des ordres d'arbitrage: {str(e)}")
+        logging.error(f"Erreur lors de l'exécution des ordres d'arbitrage pour {pair} et la stratégie {strategy}: {str(e)}")
+        send_telegram_message(f"Erreur lors de l'exécution des ordres d'arbitrage pour {pair} et la stratégie {strategy}: {str(e)}")
         return None
 
 # Calcul du profit net en utilisant les frais récupérés ou par défaut
