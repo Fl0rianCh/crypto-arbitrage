@@ -299,23 +299,25 @@ def simulate_buy_buy_sell(pair):
         return None
 
 # Simuler Achat-Vente-Vente
-def simulate_buy_sell_sell(pair):
+def simulate_buy_sell_buy(pair):
     try:
         crypto = pair.split('/')[0]  # Extraire la crypto (par exemple, ETH)
         valid_pair = generate_valid_pair(crypto)  # Générer une paire valide (éviter ETH/ETH)
 
-        if valid_pair:
-            intermediate_price = fetch_current_ticker_price(valid_pair)
-        else:
+        if not valid_pair:
             logging.error(f"Aucune paire valide disponible pour {pair}")
             return None
 
-        # Récupérer le prix de la paire USDC/Crypto (ex: PEPE/USDC, BNB/USDC)
+        # Récupérer le prix de la paire USDC/Crypto
         ticker_price_1 = fetch_current_ticker_price(pair)
-        crypto_btc_pair = pair.split('/')[0] + '/BTC'  
-        crypto_eth_pair = pair.split('/')[0] + '/ETH'  
+        if not ticker_price_1:
+            logging.error(f"Erreur dans la récupération des prix pour la paire {pair}.")
+            return None
 
-        # Vérifier si les paires BTC et ETH sont disponibles
+        # Vérifier la disponibilité des paires BTC et ETH
+        crypto_btc_pair = f'{crypto}/BTC'
+        crypto_eth_pair = f'{crypto}/ETH'
+
         crypto_btc_price = fetch_current_ticker_price(crypto_btc_pair)
         crypto_eth_price = fetch_current_ticker_price(crypto_eth_pair)
 
@@ -346,10 +348,11 @@ def simulate_buy_sell_sell(pair):
             logging.error(f"Montant final en USDC non réaliste : {final_usdc_amount}")
             return None
 
-        logging.info(f"Simulation Achat-Vente-Vente pour {pair} via {intermediate_pair} : Montant final en USDC : {final_usdc_amount}")
+        logging.info(f"Simulation Achat-Vente-Achat pour {pair} via {intermediate_pair} : Montant final en USDC : {final_usdc_amount}")
         return final_usdc_amount
+
     except Exception as e:
-        logging.error(f"Erreur lors de la simulation Achat-Vente-Vente pour {pair}: {str(e)}")
+        logging.error(f"Erreur lors de la simulation Achat-Vente-Achat pour {pair}: {str(e)}")
         return None
 
 # Fonction pour exécuter les ordres d'achat et vente
