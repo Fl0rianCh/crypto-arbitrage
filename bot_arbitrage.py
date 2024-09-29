@@ -301,6 +301,16 @@ def simulate_buy_buy_sell(pair):
 # Simuler Achat-Vente-Vente
 def simulate_buy_sell_sell(pair):
     try:
+        crypto = pair.split('/')[0]  # Extraire la crypto (par exemple, ETH)
+        valid_pair = generate_valid_pair(crypto)  # Générer une paire valide (éviter ETH/ETH)
+
+        if valid_pair:
+            intermediate_price = fetch_current_ticker_price(valid_pair)
+        else:
+            logging.error(f"Aucune paire valide disponible pour {pair}")
+            return None
+
+        # Récupérer le prix de la paire USDC/Crypto (ex: PEPE/USDC, BNB/USDC)
         ticker_price_1 = fetch_current_ticker_price(pair)
         crypto_btc_pair = pair.split('/')[0] + '/BTC'  
         crypto_eth_pair = pair.split('/')[0] + '/ETH'  
@@ -309,7 +319,7 @@ def simulate_buy_sell_sell(pair):
         crypto_btc_price = fetch_current_ticker_price(crypto_btc_pair)
         crypto_eth_price = fetch_current_ticker_price(crypto_eth_pair)
 
-        # Choisir la deuxième crypto
+        # Choisir la deuxième crypto en fonction de la disponibilité
         if crypto_btc_price:
             intermediate_pair = 'BTC'
             intermediate_price = crypto_btc_price
@@ -643,7 +653,7 @@ def check_order_filled(order):
 def execute_if_profitable():
     try:
         # Liste des paires à surveiller
-        pairs_to_monitor = ['ETH/USDC', 'SOL/USDC', 'ARB/USDC', 'MATIC/USDC', 'BNB/USDC', 'XRP/USDC', 'doge/USDC', 'ada/USDC']
+        pairs_to_monitor = ['ETH/USDC', 'SOL/USDC', 'ARB/USDC', 'MATIC/USDC', 'BNB/USDC', 'XRP/USDC', 'DOGE/USDC', 'ADA/USDC']
 
         # Stocker les profits pour chaque paire et chaque stratégie
         net_profits = {}
