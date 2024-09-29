@@ -554,16 +554,17 @@ def find_arbitrage_opportunity():
         eth_usdc_price = fetch_current_ticker_price('ETH/USDC')
         sol_usdc_price = fetch_current_ticker_price('SOL/USDC')
         arb_usdc_price = fetch_current_ticker_price('ARB/USDC')
-        matic_usdc_price = fetch_current_ticker_price('MATIC/USDC')
+        wif_usdc_price = fetch_current_ticker_price('WIF/USDC')
         bnb_usdc_price = fetch_current_ticker_price('BNB/USDC')
         xrp_usdc_price = fetch_current_ticker_price('XRP/USDC')
         doge_usdc_price = fetch_current_ticker_price('DOGE/USDC')
         ada_usdc_price = fetch_current_ticker_price('ADA/USDC')
+        fet_usdc_price = fetch_current_ticker_price('FET/USDC')
 
         # Vérifier que tous les prix sont bien récupérés
         if None in [usdc_usdt_price, btc_usdc_price, eth_usdc_price, sol_usdc_price, 
                     arb_usdc_price, matic_usdc_price, bnb_usdc_price, xrp_usdc_price, 
-                    doge_usdc_price, ada_usdc_price]:
+                    doge_usdc_price, ada_usdc_price, fet_usdc_price]:
             logging.error("Erreur dans la récupération des prix, impossible de calculer l'arbitrage.")
             return False
 
@@ -576,10 +577,10 @@ def find_arbitrage_opportunity():
         # Calcul du profit net pour chaque paire, en incluant les frais et l'investissement
         net_profits = {}
         
-        net_profits['ETH'] = ((investment / Decimal(eth_usdc_price)) * Decimal(btc_usdc_price)) * (1 - total_fees) - investment
+        net_profits['FET'] = ((investment / Decimal(fet_usdc_price)) * Decimal(btc_usdc_price)) * (1 - total_fees) - investment
         net_profits['SOL'] = ((investment / Decimal(sol_usdc_price)) * Decimal(btc_usdc_price)) * (1 - total_fees) - investment
         net_profits['ARB'] = ((investment / Decimal(arb_usdc_price)) * Decimal(btc_usdc_price)) * (1 - total_fees) - investment
-        net_profits['MATIC'] = ((investment / Decimal(matic_usdc_price)) * Decimal(btc_usdc_price)) * (1 - total_fees) - investment
+        net_profits['wif'] = ((investment / Decimal(matic_usdc_price)) * Decimal(btc_usdc_price)) * (1 - total_fees) - investment
         net_profits['BNB'] = ((investment / Decimal(bnb_usdc_price)) * Decimal(btc_usdc_price)) * (1 - total_fees) - investment
         net_profits['XRP'] = ((investment / Decimal(xrp_usdc_price)) * Decimal(btc_usdc_price)) * (1 - total_fees) - investment
         net_profits['DOGE'] = ((investment / Decimal(doge_usdc_price)) * Decimal(btc_usdc_price)) * (1 - total_fees) - investment
@@ -657,7 +658,7 @@ def check_order_filled(order):
 def execute_if_profitable():
     try:
         # Liste des paires à surveiller
-        pairs_to_monitor = ['ETH/USDC', 'SOL/USDC', 'ARB/USDC', 'MATIC/USDC', 'BNB/USDC', 'XRP/USDC', 'DOGE/USDC', 'ADA/USDC']
+        pairs_to_monitor = ['FET/USDC', 'SOL/USDC', 'ARB/USDC', 'WIF/USDC', 'BNB/USDC', 'XRP/USDC', 'DOGE/USDC', 'ADA/USDC']
 
         # Stocker les profits pour chaque paire et chaque stratégie
         net_profits = {}
