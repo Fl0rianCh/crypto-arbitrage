@@ -166,15 +166,14 @@ def check_market_status_for_pair(pair):
         return False
 
 def generate_valid_pair(crypto):
-    btc_pair = f'{crypto}/BTC'
-    eth_pair = f'{crypto}/ETH'
-
-    # Éviter de générer des paires identiques comme ETH/ETH
     if crypto == 'BTC':
-        return eth_pair  # Utiliser ETH si la crypto est BTC
+        return 'BTC/USDC'  # Retourner une autre paire si crypto est BTC
     elif crypto == 'ETH':
-        return btc_pair  # Utiliser BTC si la crypto est ETH
+        return 'ETH/USDC'  # Retourner une autre paire si crypto est ETH
     else:
+        btc_pair = f'{crypto}/BTC'
+        eth_pair = f'{crypto}/ETH'
+
         # Vérifier si les paires existent sur Binance
         btc_price = fetch_current_ticker_price(btc_pair)
         eth_price = fetch_current_ticker_price(eth_pair)
@@ -299,7 +298,7 @@ def simulate_buy_buy_sell(pair):
         return None
 
 # Simuler Achat-Vente-Vente
-def simulate_buy_sell_buy(pair):
+def simulate_buy_sell_sell(pair):
     try:
         crypto = pair.split('/')[0]  # Extraire la crypto (par exemple, ETH)
         valid_pair = generate_valid_pair(crypto)  # Générer une paire valide (éviter ETH/ETH)
@@ -348,11 +347,11 @@ def simulate_buy_sell_buy(pair):
             logging.error(f"Montant final en USDC non réaliste : {final_usdc_amount}")
             return None
 
-        logging.info(f"Simulation Achat-Vente-Achat pour {pair} via {intermediate_pair} : Montant final en USDC : {final_usdc_amount}")
+        logging.info(f"Simulation Achat-Vente-Vente pour {pair} via {intermediate_pair} : Montant final en USDC : {final_usdc_amount}")
         return final_usdc_amount
 
     except Exception as e:
-        logging.error(f"Erreur lors de la simulation Achat-Vente-Achat pour {pair}: {str(e)}")
+        logging.error(f"Erreur lors de la simulation Achat-Vente-Vente pour {pair}: {str(e)}")
         return None
 
 # Fonction pour exécuter les ordres d'achat et vente
