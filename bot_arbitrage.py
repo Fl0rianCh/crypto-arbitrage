@@ -167,9 +167,9 @@ def check_market_status_for_pair(pair):
 
 def generate_valid_pair(crypto):
     if crypto == 'BTC':
-        return 'BTC/USDC'  # Retourner une autre paire si crypto est BTC
+        return 'BTC/USDC'  # Retourner une paire valide si la crypto est BTC
     elif crypto == 'ETH':
-        return 'ETH/USDC'  # Retourner une autre paire si crypto est ETH
+        return 'ETH/USDC'  # Retourner une paire valide si la crypto est ETH
     else:
         btc_pair = f'{crypto}/BTC'
         eth_pair = f'{crypto}/ETH'
@@ -213,8 +213,8 @@ def simulate_buy_sell_buy(pair):
 
         # Récupérer le prix de la paire USDC/Crypto (ex: ADA/USDC, BNB/USDC)
         ticker_price_1 = fetch_current_ticker_price(pair)
-        crypto_btc_pair = pair.split('/')[0] + '/BTC'  
-        crypto_eth_pair = pair.split('/')[0] + '/ETH'  
+        crypto_btc_pair = f'{crypto}/BTC'
+        crypto_eth_pair = f'{crypto}/ETH'
 
         # Vérifier si les paires BTC et ETH sont disponibles
         crypto_btc_price = fetch_current_ticker_price(crypto_btc_pair)
@@ -249,6 +249,7 @@ def simulate_buy_sell_buy(pair):
 
         logging.info(f"Simulation Achat-Vente-Achat pour {pair} via {intermediate_pair} : Montant final en USDC : {final_usdc_amount}")
         return final_usdc_amount
+        
     except Exception as e:
         logging.error(f"Erreur lors de la simulation Achat-Vente-Achat pour {pair}: {str(e)}")
         return None
@@ -415,7 +416,8 @@ def execute_arbitrage_orders(pair, strategy):
     try:
         # Vérifier l'état du marché avant chaque ordre
         if not check_market_status_for_pair(pair):
-            logging.warning(f"Le marché pour {pair} est fermé.")
+            logging.warning(f"Le marché pour {pair} est fermé. Attente avant de réessayer.")
+            time.sleep(120)  # Attendre 120 secondes avant de réessayer
             return None
  
         # Récupérer les prix de la paire USDC/Crypto
