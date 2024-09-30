@@ -8,20 +8,25 @@ from dotenv import load_dotenv
 import os
 
 # Charger les variables d'environnement depuis config.env
-load_dotenv("config.env")
+load_dotenv(os.path.join(os.path.dirname(__file__), 'config.env'))
 
 # Récupérer les variables d'environnement (pour sécuriser les clés API)
 BINANCE_API_KEY = os.getenv('BINANCE_API_KEY')
 BINANCE_SECRET_KEY = os.getenv('BINANCE_SECRET_KEY')
+
+# Configuration de l'API Telegram pour les notifications
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 
-# Paramètres du bot
-initial_investment = Decimal('200')  # Montant initial en USDC
-trade_size_percentage = Decimal('0.10')  # Utilisation de 10% du capital pour chaque trade
-min_profit_threshold = Decimal('0.001')  # Profit minimum attendu (0.1%)
-spread = Decimal('0.001')  # Spread de 0.1% autour du prix du marché
-DEFAULT_FEES = Decimal('0.00075')  # Frais Binance par défaut : 0.075%
+# Paramètres dynamiques
+initial_investment = Decimal('200')  # Montant initial
+capital_percentage = Decimal('0.1')  # Utiliser 10% du capital par trade
+transaction_brokerage = Decimal('0.075') / 100  # Frais Binance
+min_trade_amount_usdc = Decimal('10')  # Montant minimal de trade en USDC
+
+DEFAULT_FEES = {
+    'binance': Decimal('0.00075')  # Frais fixes par défaut : 0,075%
+}
 
 # Initialisation du bot Telegram
 bot = Bot(token=TELEGRAM_TOKEN)
@@ -55,6 +60,11 @@ def send_telegram_message(message):
     except Exception as e:
         logging.error(f"Erreur lors de l'envoi d'un message Telegram: {str(e)}")
 
+# Fonction pour récupérer le solde disponible
+def get_balance(asset):
+    balance = binance.fetch_balance()
+    return Decimal(balance['total'].get(asset, 0))
+
 # Fonction pour récupérer le prix actuel d'une paire
 def fetch_ticker_price(symbol):
     try:
@@ -64,9 +74,9 @@ def fetch_ticker_price(symbol):
         logging.error(f"Erreur lors de la récupération du prix pour {symbol}: {str(e)}")
         return None
 
-# Calculer le montant à investir pour chaque trade (10% du capital total)
+# Calculer le montant de l'investissement pour chaque trade (10% du capital total)
 def calculate_trade_size(capital):
-    return (capital * trade_size_percentage).quantize(Decimal('0.0001'))
+    return (capital * capital_percentage).quantize(Decimal('0.00000001'))
 
 # Calculer les ordres limites pour la stratégie de Market-Making
 def generate_market_making_orders(symbol, trade_size, spread):
@@ -111,32 +121,48 @@ def cancel_open_orders(symbol):
         logging.error(f"Erreur lors de l'annulation des ordres pour {symbol}: {str(e)}")
 
 # Stratégie de Market-Making
-def market_making_strategy(symbol, capital):
-    trade_size = calculate_trade_size(capital)
-    buy_price, sell_price = generate_market_making_orders(symbol, trade_size, spread)
+def market_making_strategy(symbol):
+    # Récupérer le solde disponible en USDC
+    usdc_balance = get_balance('USDC')
+    
+    # Utiliser 10% du solde USDC
+    usdc_trade_amount = usdc_balance * capital_percentage
 
-    if buy_price and sell_price:
-        # Annuler les ordres en attente pour éviter les conflits
-        cancel_open_orders(symbol)
+    if usdc_trade_amount >= min_trade_amount_usdc:
+        # Calculer le montant de BTC à acheter en fonction de l'USDC disponible
+        buy_price, sell_price = generate_market_making_orders(symbol, usdc_trade_amount, Decimal('0.002'))
 
-        # Placer les ordres d'achat et de vente
-        buy_order = place_order(symbol, 'buy', buy_price, trade_size)
-        sell_order = place_order(symbol, 'sell', sell_price, trade_size)
+        if buy_price and sell_price:
+            # Annuler les ordres existants pour éviter les conflits
+            cancel_open_orders(symbol)
 
-        # Vérifier les exécutions
-        if buy_order and is_order_filled(buy_order):
-            logging.info(f"Ordre d'achat exécuté pour {symbol} à {buy_price}")
-            send_telegram_message(f"Achat exécuté pour {symbol} à {buy_price}")
+            # Calculer le montant de BTC à acheter
+            amount_to_buy = (usdc_trade_amount / buy_price).quantize(Decimal('0.00000001'))
+            logging.info(f"Montant à acheter : {amount_to_buy} BTC pour {usdc_trade_amount} USDC")
 
-        if sell_order and is_order_filled(sell_order):
-            logging.info(f"Ordre de vente exécuté pour {symbol} à {sell_price}")
-            send_telegram_message(f"Vente exécutée pour {symbol} à {sell_price}")
+            # Placer les ordres d'achat et de vente
+            buy_order = place_order(symbol, 'buy', buy_price, amount_to_buy)
+            sell_order = place_order(symbol, 'sell', sell_price, amount_to_buy)
+
+            # Vérifier les exécutions
+            if buy_order and is_order_filled(buy_order):
+                logging.info(f"Ordre d'achat exécuté pour {symbol} à {buy_price}")
+                send_telegram_message(f"Achat exécuté pour {symbol} à {buy_price}")
+
+            if sell_order and is_order_filled(sell_order):
+                logging.info(f"Ordre de vente exécuté pour {symbol} à {sell_price}")
+                send_telegram_message(f"Vente exécutée pour {symbol} à {sell_price}")
+        else:
+            logging.error("Erreur lors de la génération des prix d'achat et de vente.")
+    else:
+        logging.error(f"Solde USDC insuffisant pour passer un ordre. Solde actuel : {usdc_balance} USDC")
+        send_telegram_message(f"Solde USDC insuffisant pour passer un ordre. Solde actuel : {usdc_balance} USDC")
 
 # Boucle principale du bot
-def run_market_making_bot(symbol='BTC/USDC', initial_capital=initial_investment):
+def run_market_making_bot(symbol='BTC/USDC'):
     while True:
         try:
-            market_making_strategy(symbol, initial_capital)
+            market_making_strategy(symbol)
             time.sleep(60)  # Pause de 1 minute entre chaque itération
         except Exception as e:
             logging.error(f"Erreur dans la boucle principale : {str(e)}")
