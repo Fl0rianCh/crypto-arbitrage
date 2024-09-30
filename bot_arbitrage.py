@@ -115,8 +115,8 @@ fees = get_binance_fees()  # Récupérer les frais réels ou appliquer des frais
 # Validation des prix récupérés pour éviter des prix incohérents
 def validate_price(price, pair):
     try:
-        price = Decimal(price)
-        # Vérifier que le prix est dans une plage réaliste (par ex. entre 0.00001 et 100000 pour éviter des valeurs folles)
+        price = Decimal(price).quantize(Decimal('0.00000001'))  # Limiter à 8 décimales
+        # Vérifier que le prix est dans une plage réaliste (par ex. entre 0.00001 et 100000)
         if price < Decimal('0.00001') or price > Decimal('100000'):
             logging.error(f"Prix incohérent récupéré pour {pair}: {price}")
             send_telegram_message(f"Erreur: Prix incohérent récupéré pour {pair}: {price}")
@@ -238,25 +238,25 @@ def simulate_buy_sell_buy(pair):
         # Choisir la deuxième crypto en fonction de la disponibilité
         if crypto_btc_price:
             intermediate_pair = 'BTC'
-            intermediate_price = Decimal(crypto_btc_price)  # Utiliser Decimal
-            final_usdc_price = Decimal(fetch_current_ticker_price('BTC/USDC'))
+            intermediate_price = Decimal(crypto_btc_price).quantize(Decimal('0.00000001'))  # Limiter à 8 décimales
+            final_usdc_price = Decimal(fetch_current_ticker_price('BTC/USDC')).quantize(Decimal('0.00000001'))
         elif crypto_eth_price:
             intermediate_pair = 'ETH'
-            intermediate_price = Decimal(crypto_eth_price)  # Utiliser Decimal
-            final_usdc_price = Decimal(fetch_current_ticker_price('ETH/USDC'))
+            intermediate_price = Decimal(crypto_eth_price).quantize(Decimal('0.00000001'))  # Limiter à 8 décimales
+            final_usdc_price = Decimal(fetch_current_ticker_price('ETH/USDC')).quantize(Decimal('0.00000001'))
         else:
             logging.error(f"Aucune paire BTC ou ETH disponible pour {pair}")
             return None
 
         # 1. Acheter la crypto avec 40 USDC
-        ticker_price_1 = Decimal(ticker_price_1)  # Convertir le prix à Decimal
+        ticker_price_1 = Decimal(ticker_price_1).quantize(Decimal('0.00000001'))  # Convertir et limiter à 8 décimales
         crypto_amount = initial_investment / ticker_price_1
 
         # 2. Vendre la crypto contre BTC ou ETH
-        intermediate_amount = crypto_amount * intermediate_price * (1 - fees['binance'])
+        intermediate_amount = (crypto_amount * intermediate_price * (1 - fees['binance'])).quantize(Decimal('0.00000001'))
 
         # 3. Vendre BTC/ETH contre USDC
-        final_usdc_amount = intermediate_amount * final_usdc_price * (1 - fees['binance'])
+        final_usdc_amount = (intermediate_amount * final_usdc_price * (1 - fees['binance'])).quantize(Decimal('0.0001'))
 
         # Vérification du montant final en USDC
         if final_usdc_amount < Decimal('0.01') or final_usdc_amount > initial_investment * Decimal('100'):
@@ -264,8 +264,8 @@ def simulate_buy_sell_buy(pair):
             return None
 
         logging.info(f"Simulation Achat-Vente-Achat pour {pair} via {intermediate_pair} : Montant final en USDC : {final_usdc_amount}")
-        return final_usdc_amount.quantize(Decimal('0.0001'))  # Arrondir à 4 décimales
-        
+        return final_usdc_amount
+
     except Exception as e:
         logging.error(f"Erreur lors de la simulation Achat-Vente-Achat pour {pair}: {str(e)}")
         return None
