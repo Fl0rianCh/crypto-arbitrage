@@ -115,9 +115,15 @@ fees = get_binance_fees()  # Récupérer les frais réels ou appliquer des frais
 # Validation des prix récupérés pour éviter des prix incohérents
 def validate_price(price, pair):
     try:
-        price = Decimal(price).quantize(Decimal('0.00000001'))  # Limiter à 8 décimales
-        # Vérifier que le prix est dans une plage réaliste (par ex. entre 0.00001 et 100000)
-        if price < Decimal('0.00001') or price > Decimal('100000'):
+        # Limiter la précision à 8 décimales
+        price = Decimal(price).quantize(Decimal('0.00000001'))
+        
+        # Définir des seuils basés sur la paire, par exemple :
+        # Certaines paires peuvent avoir des prix très bas comme DOGE/BTC
+        lower_limit = Decimal('0.00000001')  # Ajuster cette limite si nécessaire
+        upper_limit = Decimal('100000')  # Limite supérieure réaliste
+        
+        if price < lower_limit or price > upper_limit:
             logging.error(f"Prix incohérent récupéré pour {pair}: {price}")
             send_telegram_message(f"Erreur: Prix incohérent récupéré pour {pair}: {price}")
             return None
@@ -125,7 +131,6 @@ def validate_price(price, pair):
     except (InvalidOperation, TypeError) as e:
         logging.error(f"Erreur lors de la validation du prix pour {pair}: {str(e)}")
         return None
-
 
 def check_market_status():
     binance = ensure_binance_connection()  # Vérifier la connexion
@@ -192,8 +197,13 @@ def fetch_current_ticker_price(ticker):
     if binance:
         try:
             current_ticker_details = binance.fetch_ticker(ticker)
-            ticker_price = current_ticker_details['close'] if current_ticker_details is not None else None
-            return validate_price(ticker_price, ticker)  # Appliquer la validation des prix ici
+            if current_ticker_details is not None:
+                ticker_price = current_ticker_details['close']
+                logging.info(f"Prix récupéré pour {ticker}: {ticker_price}")  # Ajouter un log avant validation
+                return validate_price(ticker_price, ticker)  # Appliquer la validation des prix ici
+            else:
+                logging.warning(f"Aucun détail trouvé pour {ticker}")
+                return None
         except Exception as e:
             logging.error(f"Erreur lors de la récupération des prix pour {ticker}: {str(e)}")
             return None
@@ -226,30 +236,144 @@ def simulate_buy_sell_buy(pair):
             logging.error(f"Aucune paire valide disponible pour {pair}")
             return None
 
-        # Récupérer le prix de la paire USDC/Crypto (ex: ADA/USDC, BNB/USDC)
         ticker_price_1 = fetch_current_ticker_price(pair)
         crypto_btc_pair = f'{crypto}/BTC'
         crypto_eth_pair = f'{crypto}/ETH'
 
+        crypto_btc_price = fetch_current_ticker_price(crypto_btc_pair)
+        crypto_eth_price = fetch_current_ticker_price(crypto_eth_pair)
+
+        if crypto_btc_price:
+            intermediate_pair = 'BTC'
+            intermediate_price = Decimal(crypto_btc_price).quantize(Decimal('0.00000001'))
+            final_usdc_price = Decimal(fetch_current_ticker_price('BTC/USDC')).quantize(Decimal('0.00000001'))
+        elif crypto_eth_price:
+            intermediate_pair = 'ETH'
+            intermediate_price = Decimal(crypto_eth_price).quantize(Decimal('0.00000001'))
+            final_usdc_price = Decimal(fetch_current_ticker_price('ETH/USDC')).quantize(Decimal('0.00000001'))
+        else:
+            logging.error(f"Aucune paire BTC ou ETH disponible pour {pair}")
+            return None
+
+        ticker_price_1 = Decimal(ticker_price_1).quantize(Decimal('0.00000001'))
+        crypto_amount = initial_investment / ticker_price_1
+
+        intermediate_amount = (crypto_amount * intermediate_price * (1 - fees['binance'])).quantize(Decimal('0.00000001'))
+
+        final_usdc_amount = (intermediate_amount * final_usdc_price * (1 - fees['binance'])).quantize(Decimal('0.0001'))
+
+        if final_usdc_amount < Decimal('0.01') or final_usdc_amount > initial_investment * Decimal('100'):
+            logging.error(f"Montant final en USDC non réaliste : {final_usdc_amount}")
+            return None
+
+        logging.info(f"Simulation Achat-Vente-Achat pour {pair} via {intermediate_pair} : Montant final en USDC : {final_usdc_amount}")
+        return final_usdc_amount
+
+    except Exception as e:
+        logging.error(f"Erreur lors de la simulation Achat-Vente-Achat pour {pair}: {str(e)}")
+        return None
+
+# Simuler Achat-Achat-Vente
+# Simuler Achat-Achat-Vente
+def simulate_buy_buy_sell(pair):
+    try:
+        crypto = pair.split('/')[0]  # Extraire la crypto (par exemple, ETH)
+        valid_pair = generate_valid_pair(crypto)  # Générer une paire valide (éviter ETH/ETH)
+
+        if valid_pair:
+            intermediate_price = fetch_current_ticker_price(valid_pair)
+            if not intermediate_price:
+                logging.error(f"Erreur lors de la récupération du prix intermédiaire pour {valid_pair}")
+                return None
+        else:
+            logging.error(f"Aucune paire valide disponible pour {pair}")
+            return None
+
+        # Récupérer le prix de la paire USDC/Crypto (ex: ADA/USDC, BNB/USDC)
+        ticker_price_1 = fetch_current_ticker_price(pair)
+        if not ticker_price_1:
+            logging.error(f"Erreur lors de la récupération du prix pour {pair}")
+            return None
+
         # Vérifier si les paires BTC et ETH sont disponibles
+        crypto_btc_pair = f'{crypto}/BTC'
+        crypto_eth_pair = f'{crypto}/ETH'
         crypto_btc_price = fetch_current_ticker_price(crypto_btc_pair)
         crypto_eth_price = fetch_current_ticker_price(crypto_eth_pair)
 
         # Choisir la deuxième crypto en fonction de la disponibilité
         if crypto_btc_price:
             intermediate_pair = 'BTC'
-            intermediate_price = Decimal(crypto_btc_price).quantize(Decimal('0.00000001'))  # Limiter à 8 décimales
+            intermediate_price = Decimal(crypto_btc_price).quantize(Decimal('0.00000001'))
             final_usdc_price = Decimal(fetch_current_ticker_price('BTC/USDC')).quantize(Decimal('0.00000001'))
         elif crypto_eth_price:
             intermediate_pair = 'ETH'
-            intermediate_price = Decimal(crypto_eth_price).quantize(Decimal('0.00000001'))  # Limiter à 8 décimales
+            intermediate_price = Decimal(crypto_eth_price).quantize(Decimal('0.00000001'))
             final_usdc_price = Decimal(fetch_current_ticker_price('ETH/USDC')).quantize(Decimal('0.00000001'))
         else:
             logging.error(f"Aucune paire BTC ou ETH disponible pour {pair}")
             return None
 
         # 1. Acheter la crypto avec 40 USDC
-        ticker_price_1 = Decimal(ticker_price_1).quantize(Decimal('0.00000001'))  # Convertir et limiter à 8 décimales
+        ticker_price_1 = Decimal(ticker_price_1).quantize(Decimal('0.00000001'))
+        crypto_amount = initial_investment / ticker_price_1
+
+        # 2. Acheter BTC/ETH avec la crypto
+        intermediate_amount = (crypto_amount * intermediate_price * (1 - fees['binance'])).quantize(Decimal('0.00000001'))
+
+        # 3. Vendre BTC/ETH contre USDC
+        final_usdc_amount = (intermediate_amount * final_usdc_price * (1 - fees['binance'])).quantize(Decimal('0.0001'))
+
+        # Vérification du montant final en USDC
+        if final_usdc_amount < Decimal('0.01') or final_usdc_amount > initial_investment * Decimal('100'):
+            logging.error(f"Montant final en USDC non réaliste : {final_usdc_amount}")
+            return None
+
+        logging.info(f"Simulation Achat-Achat-Vente pour {pair} via {intermediate_pair} : Montant final en USDC : {final_usdc_amount}")
+        return final_usdc_amount
+
+    except Exception as e:
+        logging.error(f"Erreur lors de la simulation Achat-Achat-Vente pour {pair}: {str(e)}")
+        return None
+
+# Simuler Achat-Vente-Vente
+# Simuler Achat-Vente-Vente
+def simulate_buy_sell_sell(pair):
+    try:
+        crypto = pair.split('/')[0]  # Extraire la crypto (par exemple, ETH)
+        valid_pair = generate_valid_pair(crypto)  # Générer une paire valide (éviter ETH/ETH)
+
+        if not valid_pair:
+            logging.error(f"Aucune paire valide disponible pour {pair}")
+            return None
+
+        # Récupérer le prix de la paire USDC/Crypto (ex: ADA/USDC, BNB/USDC)
+        ticker_price_1 = fetch_current_ticker_price(pair)
+        if not ticker_price_1:
+            logging.error(f"Erreur lors de la récupération du prix pour {pair}")
+            return None
+
+        # Vérifier si les paires BTC et ETH sont disponibles
+        crypto_btc_pair = f'{crypto}/BTC'
+        crypto_eth_pair = f'{crypto}/ETH'
+        crypto_btc_price = fetch_current_ticker_price(crypto_btc_pair)
+        crypto_eth_price = fetch_current_ticker_price(crypto_eth_pair)
+
+        # Choisir la deuxième crypto en fonction de la disponibilité
+        if crypto_btc_price:
+            intermediate_pair = 'BTC'
+            intermediate_price = Decimal(crypto_btc_price).quantize(Decimal('0.00000001'))
+            final_usdc_price = Decimal(fetch_current_ticker_price('BTC/USDC')).quantize(Decimal('0.00000001'))
+        elif crypto_eth_price:
+            intermediate_pair = 'ETH'
+            intermediate_price = Decimal(crypto_eth_price).quantize(Decimal('0.00000001'))
+            final_usdc_price = Decimal(fetch_current_ticker_price('ETH/USDC')).quantize(Decimal('0.00000001'))
+        else:
+            logging.error(f"Aucune paire BTC ou ETH disponible pour {pair}")
+            return None
+
+        # 1. Acheter la crypto avec 40 USDC
+        ticker_price_1 = Decimal(ticker_price_1).quantize(Decimal('0.00000001'))
         crypto_amount = initial_investment / ticker_price_1
 
         # 2. Vendre la crypto contre BTC ou ETH
@@ -263,125 +387,11 @@ def simulate_buy_sell_buy(pair):
             logging.error(f"Montant final en USDC non réaliste : {final_usdc_amount}")
             return None
 
-        logging.info(f"Simulation Achat-Vente-Achat pour {pair} via {intermediate_pair} : Montant final en USDC : {final_usdc_amount}")
+        logging.info(f"Simulation Achat-Vente-Vente pour {pair} via {intermediate_pair} : Montant final en USDC : {final_usdc_amount}")
         return final_usdc_amount
 
     except Exception as e:
-        logging.error(f"Erreur lors de la simulation Achat-Vente-Achat pour {pair}: {str(e)}")
-        return None
-
-# Simuler Achat-Achat-Vente
-def simulate_buy_buy_sell(pair):
-    try:
-        crypto = pair.split('/')[0]  # Extraire la crypto (par exemple, ETH)
-        valid_pair = generate_valid_pair(crypto)  # Générer une paire valide (éviter ETH/ETH)
-
-        if valid_pair:
-            intermediate_price = fetch_current_ticker_price(valid_pair)
-        else:
-            logging.error(f"Aucune paire valide disponible pour {pair}")
-            return None
-
-        # Récupérer le prix de la paire USDC/Crypto (ex: ADA/USDC, BNB/USDC)
-        ticker_price_1 = fetch_current_ticker_price(pair)
-        crypto_btc_pair = pair.split('/')[0] + '/BTC'  
-        crypto_eth_pair = pair.split('/')[0] + '/ETH'  
-
-        # Vérifier si les paires BTC et ETH sont disponibles
-        crypto_btc_price = fetch_current_ticker_price(crypto_btc_pair)
-        crypto_eth_price = fetch_current_ticker_price(crypto_eth_pair)
-
-        # Choisir la deuxième crypto en fonction de la disponibilité
-        if crypto_btc_price:
-            intermediate_pair = 'BTC'
-            intermediate_price = Decimal(crypto_btc_price)  # Utiliser Decimal
-            final_usdc_price = Decimal(fetch_current_ticker_price('BTC/USDC'))
-        elif crypto_eth_price:
-            intermediate_pair = 'ETH'
-            intermediate_price = Decimal(crypto_eth_price)  # Utiliser Decimal
-            final_usdc_price = Decimal(fetch_current_ticker_price('ETH/USDC'))
-        else:
-            logging.error(f"Aucune paire BTC ou ETH disponible pour {pair}")
-            return None
-
-        # 1. Acheter la crypto avec 40 USDC
-        ticker_price_1 = Decimal(ticker_price_1)  # Convertir le prix à Decimal
-        crypto_amount = initial_investment / ticker_price_1
-
-        # 2. Vendre la crypto contre BTC ou ETH
-        intermediate_amount = crypto_amount * Decimal(intermediate_price) * (1 - fees['binance'])
-
-        # 3. Vendre BTC/ETH contre USDC
-        final_usdc_amount = intermediate_amount * Decimal(final_usdc_price) * (1 - fees['binance'])
-
-        # Vérification du montant final en USDC
-        if final_usdc_amount < Decimal('0.01') or final_usdc_amount > initial_investment * Decimal('100'):
-            logging.error(f"Montant final en USDC non réaliste : {final_usdc_amount}")
-            return None
-
-        logging.info(f"Simulation Achat-Vente-Achat pour {pair} via {intermediate_pair} : Montant final en USDC : {final_usdc_amount}")
-        return final_usdc_amount.quantize(Decimal('0.0001'))  # Arrondir à 4 décimales
-        
-    except Exception as e:
-        logging.error(f"Erreur lors de la simulation Achat-Vente-Achat pour {pair}: {str(e)}")
-        return None
-
-# Simuler Achat-Vente-Vente
-def simulate_buy_sell_sell(pair):
-    try:
-        crypto = pair.split('/')[0]  # Extraire la crypto (par exemple, ETH)
-        valid_pair = generate_valid_pair(crypto)  # Générer une paire valide (éviter ETH/ETH)
-
-        if not valid_pair:
-            logging.error(f"Aucune paire valide disponible pour {pair}")
-            return None
-
-        # Récupérer le prix de la paire USDC/Crypto
-        ticker_price_1 = fetch_current_ticker_price(pair)
-        if not ticker_price_1:
-            logging.error(f"Erreur dans la récupération des prix pour la paire {pair}.")
-            return None
-
-        # Vérifier la disponibilité des paires BTC et ETH
-        crypto_btc_pair = f'{crypto}/BTC'
-        crypto_eth_pair = f'{crypto}/ETH'
-
-        crypto_btc_price = fetch_current_ticker_price(crypto_btc_pair)
-        crypto_eth_price = fetch_current_ticker_price(crypto_eth_pair)
-
-        # Choisir la deuxième crypto en fonction de la disponibilité
-        if crypto_btc_price:
-            intermediate_pair = 'BTC'
-            intermediate_price = Decimal(crypto_btc_price)  # Utiliser Decimal
-            final_usdc_price = Decimal(fetch_current_ticker_price('BTC/USDC'))
-        elif crypto_eth_price:
-            intermediate_pair = 'ETH'
-            intermediate_price = Decimal(crypto_eth_price)  # Utiliser Decimal
-            final_usdc_price = Decimal(fetch_current_ticker_price('ETH/USDC'))
-        else:
-            logging.error(f"Aucune paire BTC ou ETH disponible pour {pair}")
-            return None
-
-        # 1. Acheter la crypto avec 40 USDC
-        ticker_price_1 = Decimal(ticker_price_1)  # Convertir le prix à Decimal
-        crypto_amount = initial_investment / ticker_price_1
-
-        # 2. Vendre la crypto contre BTC ou ETH
-        intermediate_amount = crypto_amount * Decimal(intermediate_price) * (1 - fees['binance'])
-
-        # 3. Vendre BTC/ETH contre USDC
-        final_usdc_amount = intermediate_amount * Decimal(final_usdc_price) * (1 - fees['binance'])
-
-        # Vérification du montant final en USDC
-        if final_usdc_amount < Decimal('0.01') or final_usdc_amount > initial_investment * Decimal('100'):
-            logging.error(f"Montant final en USDC non réaliste : {final_usdc_amount}")
-            return None
-
-        logging.info(f"Simulation Achat-Vente-Achat pour {pair} via {intermediate_pair} : Montant final en USDC : {final_usdc_amount}")
-        return final_usdc_amount.quantize(Decimal('0.0001'))  # Arrondir à 4 décimales
-        
-    except Exception as e:
-        logging.error(f"Erreur lors de la simulation Achat-Vente-Achat pour {pair}: {str(e)}")
+        logging.error(f"Erreur lors de la simulation Achat-Vente-Vente pour {pair}: {str(e)}")
         return None
 
 # Fonction pour exécuter les ordres d'achat et vente
