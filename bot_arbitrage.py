@@ -91,22 +91,7 @@ def send_shutdown_message(signum, frame):
     send_telegram_message("Bot arrêté (Signal reçu : {}).".format(signal.Signals(signum).name))
     logging.info(f"Bot arrêté suite à la réception du signal {signal.Signals(signum).name}.")
     sys.exit(0)
-
-# Fonction pour récupérer le prix actuel d'une paire de trading
-def fetch_current_ticker_price(ticker):
-    binance = ensure_binance_connection()  # Vérifier et reconnecter si nécessaire
-    if binance:
-        try:
-            current_ticker_details = binance.fetch_ticker(ticker)
-            ticker_price = current_ticker_details['close'] if current_ticker_details is not None else None
-            return ticker_price
-        except Exception as e:
-            logging.error(f"Erreur lors de la récupération des prix pour {ticker}: {str(e)}")
-            return None
-    else:
-        logging.error(f"Impossible de se connecter à Binance pour récupérer les prix de {ticker}.")
-        return None
-
+      
 # Fonction pour récupérer les frais de trading réels via l'API Binance
 def get_binance_fees():
     try:
@@ -126,6 +111,21 @@ def get_binance_fees():
         return DEFAULT_FEES  # Utiliser les frais fixes par défaut en cas d'échec
 
 fees = get_binance_fees()  # Récupérer les frais réels ou appliquer des frais fixes
+
+# Validation des prix récupérés pour éviter des prix incohérents
+def validate_price(price, pair):
+    try:
+        price = Decimal(price)
+        # Vérifier que le prix est dans une plage réaliste (par ex. entre 0.00001 et 100000 pour éviter des valeurs folles)
+        if price < Decimal('0.00001') or price > Decimal('100000'):
+            logging.error(f"Prix incohérent récupéré pour {pair}: {price}")
+            send_telegram_message(f"Erreur: Prix incohérent récupéré pour {pair}: {price}")
+            return None
+        return price
+    except (InvalidOperation, TypeError) as e:
+        logging.error(f"Erreur lors de la validation du prix pour {pair}: {str(e)}")
+        return None
+
 
 def check_market_status():
     binance = ensure_binance_connection()  # Vérifier la connexion
@@ -185,6 +185,21 @@ def generate_valid_pair(crypto):
         else:
             logging.error(f"Aucune paire BTC ou ETH disponible pour {crypto}")
             return None
+
+# Fonction pour récupérer le prix actuel d'une paire de trading
+def fetch_current_ticker_price(ticker):
+    binance = ensure_binance_connection()  # Vérifier et reconnecter si nécessaire
+    if binance:
+        try:
+            current_ticker_details = binance.fetch_ticker(ticker)
+            ticker_price = current_ticker_details['close'] if current_ticker_details is not None else None
+            return validate_price(ticker_price, ticker)  # Appliquer la validation des prix ici
+        except Exception as e:
+            logging.error(f"Erreur lors de la récupération des prix pour {ticker}: {str(e)}")
+            return None
+    else:
+        logging.error(f"Impossible de se connecter à Binance pour récupérer les prix de {ticker}.")
+        return None
 
 def get_min_order_size(symbol):
     binance = ensure_binance_connection()
@@ -559,16 +574,15 @@ def execute_arbitrage_orders(pair, strategy):
 
 # Calcul du profit net en utilisant les frais récupérés ou par défaut
 def check_profit_loss(total_price_after_sell, initial_investment, fees, min_profit):
-    # Estimation des frais pour 3 transactions
     apprx_brokerage = fees['binance'] * initial_investment * 3  # Frais sur 3 transactions
-    # Montant minimal pour être profitable (investissement + frais + profit minimal)
     min_profitable_price = initial_investment + apprx_brokerage + min_profit
-    # Calculer le profit ou la perte net
-    profit_loss = round(total_price_after_sell - min_profitable_price, 3)
-    
-    # Log pour debug
-    logging.info(f"Profit/Loss : {profit_loss} (Minimum pour être rentable : {min_profitable_price})")
+    profit_loss = round(total_price_after_sell - min_profitable_price, 4)
 
+    # Vérification du profit pour s'assurer qu'il est dans une plage réaliste
+    if profit_loss > Decimal('1000') or profit_loss < Decimal('-100'):  # Exemple de plage réaliste
+        logging.error(f"Profit incohérent détecté: {profit_loss} USDC")
+        return Decimal('0')  # Ne pas considérer ce profit
+    logging.info(f"Profit/Loss calculé : {profit_loss} USDC")
     return profit_loss
     
 # Simuler Achat-Achat-Vente
