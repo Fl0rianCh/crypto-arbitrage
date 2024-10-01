@@ -20,9 +20,10 @@ TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 
 # Paramètres dynamiques
 initial_investment = Decimal('200')  # Montant initial
-capital_percentage = Decimal('0.1')  # Utiliser 10% du capital par trade
+capital_percentage = Decimal('0.2')  # Utiliser 10% du capital par trade
 transaction_brokerage = Decimal('0.075') / 100  # Frais Binance
 min_trade_amount_usdc = Decimal('10')  # Montant minimal de trade en USDC
+spread = Decimal('0.003')  # Élargir légèrement le spread à 0.3%
 
 DEFAULT_FEES = {
     'binance': Decimal('0.00075')  # Frais fixes par défaut : 0,075%
@@ -130,7 +131,7 @@ def market_making_strategy(symbol):
 
     if usdc_trade_amount >= min_trade_amount_usdc:
         # Calculer le montant de BTC à acheter en fonction de l'USDC disponible
-        buy_price, sell_price = generate_market_making_orders(symbol, usdc_trade_amount, Decimal('0.002'))
+        buy_price, sell_price = generate_market_making_orders(symbol, usdc_trade_amount, spread)
 
         if buy_price and sell_price:
             # Annuler les ordres existants pour éviter les conflits
@@ -163,7 +164,7 @@ def run_market_making_bot(symbol='BTC/USDC'):
     while True:
         try:
             market_making_strategy(symbol)
-            time.sleep(60)  # Pause de 1 minute entre chaque itération
+            time.sleep(300)  # Pause de 5 minutes entre chaque itération pour laisser les ordres se remplir
         except Exception as e:
             logging.error(f"Erreur dans la boucle principale : {str(e)}")
             send_telegram_message(f"Erreur dans la boucle principale : {str(e)}")
