@@ -37,8 +37,8 @@ kucoin_api_secret = os.environ.get('kucoin_api_secret')
 kucoin_password = os.environ.get('kucoin_password')
 
 # Load bot token and chat ID
-bot_token = os.environ.get('bot_token')
-chat_id = os.environ.get('chat_id')
+bot_token = os.environ.get('TELEGRAM_TOKEN')
+chat_id = os.environ.get('TELEGRAM_CHAT_ID')
 
 # Set the minimum time between messages of the Telegram Bot for each trading pair (in seconds)
 min_message_interval = 60   # 1 minute
@@ -428,7 +428,7 @@ async def main():
     
     # Get user input on USDC initial amount
     while True:
-        initial_amount_input = input("How many USDC do you want to trade? | Only numbers are accepted (in the form 1, 10, 20.1) \nUSDT amount:  ")
+        initial_amount_input = input("How many USDC do you want to trade? | Only numbers are accepted (in the form 1, 10, 20.1) \nUSDC amount:  ")
         try:
             # Try to convert the input to a Decimal
             initial_amount = Decimal(initial_amount_input)
