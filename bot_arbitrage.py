@@ -46,6 +46,16 @@ min_message_interval = 60   # 1 minute
 # Create a dictionary to keep track of the last time a message was sent for each trading pair
 last_message_times = {}
 
+# Define the list of specific USDC pairs to analyze
+TARGET_PAIRS = [
+    'BTC/USDC',
+    'ETH/USDC',
+    'XRP/USDC',
+    'LTC/USDC',
+    'BNB/USDC',
+    # Ajoute d'autres paires selon tes préférences
+]
+
 # Load exchanges
 kucoin = ccxt.kucoin({
     'apiKey': kucoin_api_key,
@@ -95,7 +105,7 @@ async def execute_trade(exchange, first_symbol, second_symbol, third_symbol, tic
         order = await exchange.fetch_order(order_id, first_symbol)
         if order['status'] == 'closed':
             break
-        await asyncio.sleep(1)
+        await asyncio.sleep(3)
 
     # Retrieve actual amount of first trading pair bought
     first_trade = Decimal(order['filled'])
@@ -113,7 +123,7 @@ async def execute_trade(exchange, first_symbol, second_symbol, third_symbol, tic
         order = await exchange.fetch_order(order_id, second_symbol)
         if order['status'] == 'closed':
             break
-        await asyncio.sleep(1)
+        await asyncio.sleep(3)
 
     # Retrieve actual cost of second trading pair
     second_trade = Decimal(order['cost'])
@@ -130,7 +140,7 @@ async def execute_trade(exchange, first_symbol, second_symbol, third_symbol, tic
         order = await exchange.fetch_order(order_id, third_symbol)
         if order['status'] == 'closed':
             break
-        await asyncio.sleep(1)
+        await asyncio.sleep(3)
     
     # Fetch final balance
     balance = await exchange.fetch_balance()
@@ -148,7 +158,10 @@ async def execute_trade(exchange, first_symbol, second_symbol, third_symbol, tic
 # Function for calculating the price impact of the order based on the orderbook asks, bids, and volumes
 async def calculate_price_impact(exchange, symbols, order_sizes, sides):
     logging.info(f'Calculating price impact ')
-    
+
+    # Limiter les symboles aux paires sélectionnées
+    symbols = [symbol for symbol in symbols if symbol in TARGET_PAIRS] 
+
     # Fetch order books concurrently
     order_books = await asyncio.gather(*[exchange.fetch_order_book(symbol) for symbol in symbols])
     logging.info(f'Order books fetched on {exchange}')
@@ -216,8 +229,8 @@ async def find_triangular_arbitrage_opportunities(exchange, markets, tickers, ex
     symbols = list(markets.keys())
     tickers = await exchange.fetch_tickers()
     
-    # Create a dictionary with all the USDC symbols
-    usdc_symbols = {symbol for symbol in markets.keys() if symbol.endswith('/USDC')}
+    # Create a dictionary with all the USDC symbols from TARGET_PAIRS
+    usdc_symbols = {symbol for symbol in TARGET_PAIRS if symbol in markets and symbol.endswith('/USDC')}
     symbols_by_base = {}
     
     for symbol in markets.keys():
@@ -483,7 +496,7 @@ async def main():
 
             iteration_count += 1 # increment iteration counter
             
-            await asyncio.sleep(10) # sleep for 10 seconds before starting next iteration
+            await asyncio.sleep(30) # sleep for 10 seconds before starting next iteration
         
         except Exception as e:
             print(f'An error occurred: {e}')
