@@ -215,11 +215,20 @@ async def find_triangular_arbitrage_opportunities(exchange, markets, tickers, ex
     # Read existing trades from CSV file
     csv_file = 'tri_arb_opportunities.csv'
     
-    if os.path.exists(csv_file) and os.path.getsize(csv_file) > 0:
-        df = pd.read_csv(csv_file)
-        tri_arb_opportunities = df.to_dict('records')
-    else:
+    # Vérifie si le fichier CSV est vide ou n'existe pas
+    if not os.path.exists(csv_file) or os.path.getsize(csv_file) == 0:
+        # Si le fichier n'existe pas ou est vide, créer un fichier CSV avec un en-tête par défaut
+        with open(csv_file, 'w') as f:
+            f.write("exchange,order_size,first_symbol,second_symbol,third_symbol,first_price,second_price,third_price,profit_percentage,time\n")
         tri_arb_opportunities = []
+    else:
+        # Si le fichier existe et n'est pas vide, le lire
+        try:
+            df = pd.read_csv(csv_file)
+            tri_arb_opportunities = df.to_dict('records')
+        except pd.errors.EmptyDataError:
+            logging.warning("Le fichier CSV est vide, création d'une nouvelle liste d'opportunités.")
+            tri_arb_opportunities = []
     
     # Add a new variable to keep track of the last time a trade was added to the CSV file for each trading pair
     last_trade_time = {}
