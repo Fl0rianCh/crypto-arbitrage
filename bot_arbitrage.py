@@ -15,9 +15,25 @@ import logging
 from decimal import ROUND_DOWN,ROUND_UP
 from decimal import Decimal, InvalidOperation
 import numpy as np
+from logging.handlers import TimedRotatingFileHandler
 
 
-logging.basicConfig(filename='arbitrage.log', level=logging.INFO, format='%(asctime)s %(message)s')
+# Configure logger with timed rotation
+log_file = 'arbitrage.log'
+
+# Set up a timed rotating file handler to create a new log file every day and keep 7 days of logs
+handler = TimedRotatingFileHandler(log_file, when="midnight", interval=1, backupCount=7)  # New log every day, keep last 7 days
+
+# Define log format
+formatter = logging.Formatter('%(asctime)s %(message)s')
+handler.setFormatter(formatter)
+
+# Set up the logger
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)  # Adjust this level based on what you want to log (DEBUG, INFO, etc.)
+logger.addHandler(handler)
+
+# Start time for performance tracking
 start_time = time.time()
 
 # Load API keys from config.env file
@@ -221,10 +237,12 @@ async def find_triangular_arbitrage_opportunities(exchange, markets, tickers, ex
     
     # Load markets data and tickers
     markets = await exchange.load_markets(True)
+    logging.info(f"Markets loaded for {exchange_name}: {len(markets)} pairs available")
     tickers = await exchange.fetch_tickers()
     
     # Dynamically get all USDC pairs
     usdc_symbols = get_usdc_pairs(markets)
+    logging.info(f"USDC pairs available on {exchange_name}: {len(usdc_symbols)}")
     
     symbols_by_base = {}
     
@@ -277,13 +295,16 @@ async def find_triangular_arbitrage_opportunities(exchange, markets, tickers, ex
                     first_price = Decimal(tickers[first_symbol]['ask'])
                     second_price = Decimal(tickers[second_symbol]['bid'])
                     third_price = Decimal(tickers[third_symbol]['bid'])
+                    logging.info(f"Prices for {first_symbol}, {second_symbol}, {third_symbol} on {exchange_name}: {first_price}, {second_price}, {third_price}")
                 else:
-                    continue 
-                    
+                    logging.warning(f"Price data missing for {first_symbol}, {second_symbol}, or {third_symbol} on {exchange_name}")
+                    continue
+    
                 # Quantize the prices
                 first_price = first_price.quantize(Decimal(str(first_tick_size)), rounding=ROUND_DOWN)
                 second_price = second_price.quantize(Decimal(str(second_tick_size)), rounding=ROUND_DOWN)
                 third_price = third_price.quantize(Decimal(str(third_tick_size)), rounding=ROUND_DOWN)
+                logging.info(f"Quantized prices for {first_symbol}, {second_symbol}, {third_symbol}: {first_price}, {second_price}, {third_price}")
 
                 if not first_price or not second_price or not third_price:
                     continue
@@ -315,8 +336,10 @@ async def find_triangular_arbitrage_opportunities(exchange, markets, tickers, ex
                 opportunities = []
 
                 if profit_percentage > 0.1:
-                    logging.info(f'Arbitrage opportunity found. Checking liquidity on {exchange_name}...')
-                    
+                    logging.info(f"Arbitrage opportunity found on {exchange_name} for {first_symbol} -> {second_symbol} -> {third_symbol} with profit_percentage: {profit_percentage:.2f}%")
+                else:
+                    logging.info(f"No profitable opportunity found for {first_symbol} -> {second_symbol} -> {third_symbol}. Profit: {profit_percentage:.2f}%")
+
                     opportunities.append({
                         'first_symbol': first_symbol,
                         'second_symbol': second_symbol,
@@ -491,7 +514,7 @@ async def main():
 
             iteration_count += 1 # increment iteration counter
             
-            await asyncio.sleep(15) # sleep for 15 seconds before starting next iteration
+            await asyncio.sleep(10) # sleep for 15 seconds before starting next iteration
         
         except Exception as e:
             print(f'An error occurred: {e}')
