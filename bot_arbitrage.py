@@ -383,7 +383,13 @@ async def find_triangular_arbitrage_opportunities(exchange, markets, tickers, ex
                             third_price_impact = Decimal(third_price_impact).quantize(Decimal(str(third_tick_size)), rounding=ROUND_DOWN)
 
                         # Calculate trades considering price impact and including fees
-                        first_trade_before_fees = initial_amount / first_price_impact 
+                        # Vérifier si l'une des valeurs de price impact est None avant de continuer
+                        if first_price_impact is None or second_price_impact is None or third_price_impact is None:
+                            logging.warning(f"Un des impacts de prix est None pour {first_symbol}, {second_symbol}, {third_symbol}. Opportunité ignorée.")
+                            continue
+
+                        # Si les impacts de prix sont valides, continuer avec le calcul
+                        first_trade_before_fees = initial_amount / first_price_impact
                         first_trade_amount = first_trade_before_fees * (1 - Decimal(fee))
                         first_trade_amount = first_trade_amount.quantize(Decimal(str(first_tick_size)), rounding=ROUND_DOWN)
 
