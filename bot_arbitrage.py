@@ -335,7 +335,7 @@ async def find_triangular_arbitrage_opportunities(exchange, markets, tickers, ex
                 
                 opportunities = []
 
-                if profit_percentage > 0.1:
+                if profit_percentage > 0.08:
                     logging.info(f"Arbitrage opportunity found on {exchange_name} for {first_symbol} -> {second_symbol} -> {third_symbol} with profit_percentage: {profit_percentage:.2f}%")
                 else:
                     logging.info(f"No profitable opportunity found for {first_symbol} -> {second_symbol} -> {third_symbol}. Profit: {profit_percentage:.2f}%")
@@ -396,7 +396,7 @@ async def find_triangular_arbitrage_opportunities(exchange, markets, tickers, ex
 
                         logging.info(f'After liquidity check on {exchange_name}: first_symbol= {first_symbol}, first_price = {first_price_impact}, second_symbol = {second_symbol} second_price = {second_price_impact}, third_symbol = {third_symbol}, third_price = {third_price_impact}, profit percentage: {real_profit_percentage}')
                         
-                        if real_profit_percentage > 0.1:
+                        if real_profit_percentage > 0.08:
                             logging.info(f'Arbitrage opportunity confirmed on {exchange_name}.')
                             # Execute trades and send notification
                             profit, final_amount = await execute_trade(
