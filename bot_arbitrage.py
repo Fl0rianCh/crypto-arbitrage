@@ -11,10 +11,8 @@ import time
 from datetime import datetime
 import os.path
 import traceback
-from decimal import Decimal
 import logging
 from decimal import ROUND_DOWN,ROUND_UP
-import asyncio
 from decimal import Decimal, InvalidOperation
 import numpy as np
 
@@ -33,7 +31,6 @@ kraken_api_secret = os.environ.get('kraken_api_secret')
 
 kucoin_api_key = os.environ.get('kucoin_api_key')
 kucoin_api_secret = os.environ.get('kucoin_api_secret')
-kucoin_api_secret = os.environ.get('kucoin_api_secret')
 kucoin_password = os.environ.get('kucoin_password')
 
 # Load bot token and chat ID
@@ -46,15 +43,9 @@ min_message_interval = 60   # 1 minute
 # Create a dictionary to keep track of the last time a message was sent for each trading pair
 last_message_times = {}
 
-# Define the list of specific USDC pairs to analyze
-TARGET_PAIRS = [
-    'BTC/USDC',
-    'ETH/USDC',
-    'XRP/USDC',
-    'LTC/USDC',
-    'BNB/USDC',
-    # Ajoute d'autres paires selon tes préférences
-]
+# Retrieve all USDC pairs dynamically
+def get_usdc_pairs(markets):
+    return [symbol for symbol in markets.keys() if symbol.endswith('/USDC')]
 
 # Load exchanges
 kucoin = ccxt.kucoin({
@@ -159,9 +150,6 @@ async def execute_trade(exchange, first_symbol, second_symbol, third_symbol, tic
 async def calculate_price_impact(exchange, symbols, order_sizes, sides):
     logging.info(f'Calculating price impact ')
 
-    # Limiter les symboles aux paires sélectionnées
-    symbols = [symbol for symbol in symbols if symbol in TARGET_PAIRS] 
-
     # Fetch order books concurrently
     order_books = await asyncio.gather(*[exchange.fetch_order_book(symbol) for symbol in symbols])
     logging.info(f'Order books fetched on {exchange}')
@@ -215,47 +203,46 @@ async def find_triangular_arbitrage_opportunities(exchange, markets, tickers, ex
     # Read existing trades from CSV file
     csv_file = 'tri_arb_opportunities.csv'
     
-    # Vérifie si le fichier CSV est vide ou n'existe pas
     if not os.path.exists(csv_file) or os.path.getsize(csv_file) == 0:
-        # Si le fichier n'existe pas ou est vide, créer un fichier CSV avec un en-tête par défaut
+        # Create a CSV file with a default header if the file doesn't exist or is empty
         with open(csv_file, 'w') as f:
             f.write("exchange,order_size,first_symbol,second_symbol,third_symbol,first_price,second_price,third_price,profit_percentage,time\n")
         tri_arb_opportunities = []
     else:
-        # Si le fichier existe et n'est pas vide, le lire
         try:
             df = pd.read_csv(csv_file)
             tri_arb_opportunities = df.to_dict('records')
         except pd.errors.EmptyDataError:
-            logging.warning("Le fichier CSV est vide, création d'une nouvelle liste d'opportunités.")
+            logging.warning("CSV file is empty, creating a new list of opportunities.")
             tri_arb_opportunities = []
     
     # Add a new variable to keep track of the last time a trade was added to the CSV file for each trading pair
     last_trade_time = {}
     
-    #load markets data
+    # Load markets data and tickers
     markets = await exchange.load_markets(True)
-    symbols = list(markets.keys())
     tickers = await exchange.fetch_tickers()
     
-    # Create a dictionary with all the USDC symbols from TARGET_PAIRS
-    usdc_symbols = {symbol for symbol in TARGET_PAIRS if symbol in markets and symbol.endswith('/USDC')}
+    # Dynamically get all USDC pairs
+    usdc_symbols = get_usdc_pairs(markets)
+    
     symbols_by_base = {}
     
+    # Create a dictionary grouping symbols by their base currency
     for symbol in markets.keys():
         base, quote = symbol.split('/')
         if base not in symbols_by_base:
             symbols_by_base[base] = set()
         symbols_by_base[base].add(symbol)
     
-    # Split the first symbol in base and quote
+    # Loop through all USDC symbols
     for usdc_symbol in usdc_symbols:
         first_symbol = usdc_symbol
         base, quote = usdc_symbol.split('/')
         second_base = base
         second_symbols = symbols_by_base.get(second_base, set())
         
-        # Loop to find all the possible second symbols
+        # Loop through all possible second symbols
         for second_symbol in second_symbols:
             unavailable_pairs = {'YGG/BNB', 'RAD/BNB', 'VOXEL/BNB', 'GLMR/BNB', 'UNI/EUR'}
             if second_symbol == first_symbol or second_symbol in unavailable_pairs:
@@ -268,10 +255,10 @@ async def find_triangular_arbitrage_opportunities(exchange, markets, tickers, ex
             # Third symbol 
             third_symbol = f'{third_base}/USDC'
             
-            # Check if trading pairs are valid on the exchange
+            # Check if the trading pairs are valid on the exchange
             if third_symbol in markets and first_symbol in markets and second_symbol in markets:
                 
-                # Retrieve tick size for all trading pairs
+                # Retrieve tick sizes for all trading pairs
                 market = exchange.markets
                 
                 first_market = market[first_symbol]
@@ -303,9 +290,11 @@ async def find_triangular_arbitrage_opportunities(exchange, markets, tickers, ex
 
                 # Check for zero prices to avoid division by zero
                 if first_price == 0 or second_price == 0 or third_price == 0:
+                    logging.warning(f"Invalid prices detected: {first_symbol}, {second_symbol}, {third_symbol}")
                     continue
 
-                #Trades calculation
+
+                # Trades calculation
                 first_trade = initial_amount / first_price
                 first_trade = first_trade.quantize(Decimal(str(first_tick_size)), rounding=ROUND_DOWN)
                 
@@ -325,10 +314,8 @@ async def find_triangular_arbitrage_opportunities(exchange, markets, tickers, ex
                 
                 opportunities = []
 
-                
-                if profit_percentage > 0.3:
+                if profit_percentage > 0.1:
                     logging.info(f'Arbitrage opportunity found. Checking liquidity on {exchange_name}...')
-                    print(f'\rArbitrage opportunities found, checking liquidity', end='\r')
                     
                     opportunities.append({
                         'first_symbol': first_symbol,
@@ -349,8 +336,8 @@ async def find_triangular_arbitrage_opportunities(exchange, markets, tickers, ex
 
                     # Calculate price impacts for top opportunities
                     for opportunity in top_opportunities:
-                         # Log prices before checking opportunity
-                        logging.info(f'Before opportunity check on {exchange_name}: first_symbol= {first_symbol}, first_price = {first_price}, second_symbol = {second_symbol} second_price = {second_price}, third_symbol = {third_symbol}, third_price = {third_price}, profit percentage: {profit_percentage}')
+                        # Log prices before checking opportunity
+                        logging.info(f'Before opportunity check on {exchange_name}: first_symbol= {first_symbol}, first_price = {first_price}, second_symbol = {second_symbol}, second_price = {second_price}, third_symbol = {third_symbol}, third_price = {third_price}, profit percentage: {profit_percentage}')
 
                         price_impacts = await calculate_price_impact(
                             exchange,
@@ -369,7 +356,7 @@ async def find_triangular_arbitrage_opportunities(exchange, markets, tickers, ex
 
                         # Calculate trades considering price impact and including fees
                         first_trade_before_fees = initial_amount / first_price_impact 
-                        first_trade_amount = first_trade_before_fees * ( 1- Decimal(fee))
+                        first_trade_amount = first_trade_before_fees * (1 - Decimal(fee))
                         first_trade_amount = first_trade_amount.quantize(Decimal(str(first_tick_size)), rounding=ROUND_DOWN)
 
                         second_trade_before_fees = first_trade_amount * second_price_impact
@@ -385,18 +372,17 @@ async def find_triangular_arbitrage_opportunities(exchange, markets, tickers, ex
                         real_profit_percentage = (real_profit / initial_amount) * 100
 
                         logging.info(f'After liquidity check on {exchange_name}: first_symbol= {first_symbol}, first_price = {first_price_impact}, second_symbol = {second_symbol} second_price = {second_price_impact}, third_symbol = {third_symbol}, third_price = {third_price_impact}, profit percentage: {real_profit_percentage}')
+                        
                         if real_profit_percentage > 0.1:
-                            
                             logging.info(f'Arbitrage opportunity confirmed on {exchange_name}.')
-
-                            # call execute trades
+                            # Execute trades and send notification
                             profit, final_amount = await execute_trade(
                                 exchange,
                                 first_symbol,
                                 second_symbol,
                                 third_symbol,
                                 tickers,
-                                initial_amount ,
+                                initial_amount,
                                 fee,
                                 first_tick_size,
                                 second_tick_size,
@@ -488,7 +474,7 @@ async def main():
             )
 
             # Set fees for all exchanges
-            binance_fee = 0.001
+            binance_fee = 0.0007
             kucoin_fee = 0.001
             kraken_fee = 0.001           
          
@@ -505,7 +491,7 @@ async def main():
 
             iteration_count += 1 # increment iteration counter
             
-            await asyncio.sleep(30) # sleep for 10 seconds before starting next iteration
+            await asyncio.sleep(15) # sleep for 15 seconds before starting next iteration
         
         except Exception as e:
             print(f'An error occurred: {e}')
