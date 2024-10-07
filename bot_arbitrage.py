@@ -166,11 +166,11 @@ async def execute_trade(exchange, first_symbol, second_symbol, third_symbol, tic
 
 # Function for calculating the price impact of the order based on the orderbook asks, bids, and volumes
 async def calculate_price_impact(exchange, symbols, order_sizes, sides):
-    logging.info(f'Calculating price impact ')
+    logging.info(f'Calcul de l impact sur les prix ')
 
     # Fetch order books concurrently
     order_books = await asyncio.gather(*[exchange.fetch_order_book(symbol) for symbol in symbols])
-    logging.info(f'Order books fetched on {exchange}')
+    logging.info(f'Carnets d ordres récupérés sur {exchange}')
     price_impacts = []
 
     for i in range(len(symbols)):
@@ -185,9 +185,9 @@ async def calculate_price_impact(exchange, symbols, order_sizes, sides):
         # Slice orders into prices and volumes
         prices, volumes = orders[:,0], orders[:,1]
 
-        logging.info(f'Processing order book for {symbol} with side {side} and order size {order_size}')
-        logging.info(f'Order book prices: {prices}')
-        logging.info(f'Order book volumes: {volumes}')
+        logging.info(f'Traitement du carnet d ordres pour {symbol} avec cotes {side} et tailles d ordres {order_size}')
+        # logging.info(f'Order book prices: {prices}')
+        # logging.info(f'Order book volumes: {volumes}')
 
         total_value = 0
         total_volume = 0
@@ -231,7 +231,7 @@ async def find_triangular_arbitrage_opportunities(exchange, markets, tickers, ex
             df = pd.read_csv(csv_file)
             tri_arb_opportunities = df.to_dict('records')
         except pd.errors.EmptyDataError:
-            logging.warning("CSV file is empty, creating a new list of opportunities.")
+            logging.warning("Le fichier CSV est vide, création d'une nouvelle liste d'opportunités.")
             tri_arb_opportunities = []
     
     # Add a new variable to keep track of the last time a trade was added to the CSV file for each trading pair
@@ -239,12 +239,12 @@ async def find_triangular_arbitrage_opportunities(exchange, markets, tickers, ex
     
     # Load markets data and tickers
     markets = await exchange.load_markets(True)
-    logging.info(f"Markets loaded for {exchange_name}: {len(markets)} pairs available")
+    logging.info(f"Marchés chargés pour {exchange_name} : {len(markets)} paires disponibles.")
     tickers = await exchange.fetch_tickers()
     
     # Dynamically get all USDC pairs
     usdc_symbols = get_usdc_pairs(markets)
-    logging.info(f"USDC pairs available on {exchange_name}: {len(usdc_symbols)}")
+    logging.info(f"Paires USDC disponibles sur {exchange_name} : {len(usdc_symbols)}.")
     
     symbols_by_base = {}
     
@@ -297,23 +297,23 @@ async def find_triangular_arbitrage_opportunities(exchange, markets, tickers, ex
                     first_price = Decimal(tickers[first_symbol]['ask'])
                     second_price = Decimal(tickers[second_symbol]['bid'])
                     third_price = Decimal(tickers[third_symbol]['bid'])
-                    logging.info(f"Prices for {first_symbol}, {second_symbol}, {third_symbol} on {exchange_name}: {first_price}, {second_price}, {third_price}")
+                    logging.info(f"Prix pour {first_symbol}, {second_symbol}, {third_symbol} sur {exchange_name} : {first_price}, {second_price}, {third_price}.")
                 else:
-                    logging.warning(f"Price data missing for {first_symbol}, {second_symbol}, or {third_symbol} on {exchange_name}")
+                    logging.warning(f"Données de prix manquantes pour {first_symbol}, {second_symbol}, ou {third_symbol} sur {exchange_name}.")
                     continue
     
                 # Quantize the prices
                 first_price = first_price.quantize(Decimal(str(first_tick_size)), rounding=ROUND_DOWN)
                 second_price = second_price.quantize(Decimal(str(second_tick_size)), rounding=ROUND_DOWN)
                 third_price = third_price.quantize(Decimal(str(third_tick_size)), rounding=ROUND_DOWN)
-                logging.info(f"Quantized prices for {first_symbol}, {second_symbol}, {third_symbol}: {first_price}, {second_price}, {third_price}")
+                logging.info(f"Prix quantifiés pour {first_symbol}, {second_symbol}, {third_symbol} : {first_price}, {second_price}, {third_price}.")
 
                 if not first_price or not second_price or not third_price:
                     continue
 
                 # Check for zero prices to avoid division by zero
                 if first_price == 0 or second_price == 0 or third_price == 0:
-                    logging.warning(f"Invalid prices detected: {first_symbol}, {second_symbol}, {third_symbol}")
+                    logging.warning(f"Prix invalides détectés : {first_symbol}, {second_symbol}, {third_symbol}.")
                     continue
 
 
@@ -338,9 +338,9 @@ async def find_triangular_arbitrage_opportunities(exchange, markets, tickers, ex
                 opportunities = []
 
                 if profit_percentage > 0.08:
-                    logging.info(f"Arbitrage opportunity found on {exchange_name} for {first_symbol} -> {second_symbol} -> {third_symbol} with profit_percentage: {profit_percentage:.2f}%")
+                    logging.info(f"Opportunité d'arbitrage trouvée sur {exchange_name} pour {first_symbol} -> {second_symbol} -> {third_symbol} avec un pourcentage de profit : {profit_percentage:.2f}%.")
                 else:
-                    logging.info(f"No profitable opportunity found for {first_symbol} -> {second_symbol} -> {third_symbol}. Profit: {profit_percentage:.2f}%")
+                    logging.info(f"Aucune opportunité rentable trouvée pour {first_symbol} -> {second_symbol} -> {third_symbol}. Profit : {profit_percentage:.2f}%.")
 
                     opportunities.append({
                         'first_symbol': first_symbol,
@@ -362,7 +362,7 @@ async def find_triangular_arbitrage_opportunities(exchange, markets, tickers, ex
                     # Calculate price impacts for top opportunities
                     for opportunity in top_opportunities:
                         # Log prices before checking opportunity
-                        logging.info(f'Before opportunity check on {exchange_name}: first_symbol= {first_symbol}, first_price = {first_price}, second_symbol = {second_symbol}, second_price = {second_price}, third_symbol = {third_symbol}, third_price = {third_price}, profit percentage: {profit_percentage}')
+                        logging.info(f'Avant vérification de l’opportunité sur {exchange_name} : first_symbol= {first_symbol}, first_price = {first_price}, second_symbol = {second_symbol}, second_price = {second_price}, third_symbol = {third_symbol}, third_price = {third_price}, pourcentage de profit : {profit_percentage}.')
 
                         price_impacts = await calculate_price_impact(
                             exchange,
@@ -396,10 +396,10 @@ async def find_triangular_arbitrage_opportunities(exchange, markets, tickers, ex
                         real_profit = third_trade_amount - initial_amount
                         real_profit_percentage = (real_profit / initial_amount) * 100
 
-                        logging.info(f'After liquidity check on {exchange_name}: first_symbol= {first_symbol}, first_price = {first_price_impact}, second_symbol = {second_symbol} second_price = {second_price_impact}, third_symbol = {third_symbol}, third_price = {third_price_impact}, profit percentage: {real_profit_percentage}')
+                        logging.info(f'Après vérification de la liquidité sur {exchange_name} : first_symbol= {first_symbol}, first_price = {first_price_impact}, second_symbol = {second_symbol}, second_price = {second_price_impact}, third_symbol = {third_symbol}, third_price = {third_price_impact}, pourcentage de profit : {real_profit_percentage}.')
                         
                         if real_profit_percentage > 0.08:
-                            logging.info(f'Arbitrage opportunity confirmed on {exchange_name}.')
+                            logging.info(f'Opportunité d’arbitrage confirmée sur {exchange_name}.')
                             # Execute trades and send notification
                             profit, final_amount = await execute_trade(
                                 exchange,
@@ -448,7 +448,7 @@ async def find_triangular_arbitrage_opportunities(exchange, markets, tickers, ex
                                 tri_arb_opportunities.append(trade_data)
                                 last_trade_time[trade_key]= current_time
                         else:
-                            logging.info(f'Arbitrage opportunity not confirmed on {exchange_name}.')
+                            logging.info(f'Opportunité d’arbitrage non confirmée sur {exchange_name}.')
                             # Print arbitrage opportunity message
                             print(f'\rArbitrage opportunities found, checking liquidity | Opportunities not confirmed', end='\r')     
 
@@ -480,11 +480,11 @@ async def main():
     updater.start_polling()
     
     # Message from the Telegram Bot
-    await send_message(bot_token, chat_id, "Finding arbitrage opportunities...")
+    await send_message(bot_token, chat_id, "Lets Go ! Recherche d’opportunités d’arbitrage.")
     global running
     running = True
     
-    print('\nFinding arbitrage opportunities...')
+    print('\nLets Go ! Recherche d’opportunités d’arbitrage.')
     
     iteration_count = 1 # initialize iteration counter
     while running:
