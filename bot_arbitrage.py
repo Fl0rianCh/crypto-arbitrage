@@ -375,9 +375,12 @@ async def find_triangular_arbitrage_opportunities(exchange, markets, tickers, ex
                         first_price_impact, second_price_impact, third_price_impact = price_impacts
 
                         # Quantize the price impacts
-                        first_price_impact = Decimal(first_price_impact).quantize(Decimal(str(first_tick_size)), rounding=ROUND_UP)
-                        second_price_impact = Decimal(second_price_impact).quantize(Decimal(str(second_tick_size)), rounding=ROUND_DOWN)
-                        third_price_impact = Decimal(third_price_impact).quantize(Decimal(str(third_tick_size)), rounding=ROUND_DOWN)
+                        if first_price_impact is not None:
+                            first_price_impact = Decimal(first_price_impact).quantize(Decimal(str(first_tick_size)), rounding=ROUND_UP)
+                        if second_price_impact is not None:
+                            second_price_impact = Decimal(second_price_impact).quantize(Decimal(str(second_tick_size)), rounding=ROUND_DOWN)
+                        if third_price_impact is not None:
+                            third_price_impact = Decimal(third_price_impact).quantize(Decimal(str(third_tick_size)), rounding=ROUND_DOWN)
 
                         # Calculate trades considering price impact and including fees
                         first_trade_before_fees = initial_amount / first_price_impact 
