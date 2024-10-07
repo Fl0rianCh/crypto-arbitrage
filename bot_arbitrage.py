@@ -196,9 +196,6 @@ async def calculate_price_impact(exchange, symbols, order_sizes, sides):
             if order_size > 0:
                 volume_for_this_order = min(volumes[j], order_size)
                 value_for_this_order = volume_for_this_order * prices[j]
-
-                logging.info(f'At price level {prices[j]}: volume_for_this_order={volume_for_this_order}, value_for_this_order={value_for_this_order}')
-
                 total_value += value_for_this_order
                 total_volume += volume_for_this_order
                 order_size -= volume_for_this_order
