@@ -95,24 +95,23 @@ async def execute_trade(exchange, first_symbol, second_symbol, third_symbol, tic
     second_trade = first_trade
 
     # Place second order
+    second_trade = second_trade * (1 - Decimal(fee))
     print(f'Placing second order: {second_trade} {second_symbol}')
     order = await exchange.create_order(second_symbol, 'market', 'sell', float(second_trade))
     order_id = order['id']
 
-    # Wait for second order to be filled
+   # Wait for second order to be filled
     while True:
         order = await exchange.fetch_order(order_id, second_symbol)
         if order['status'] == 'closed':
             break
         await asyncio.sleep(1)
 
-    # Retrieve actual cost of second trading pair
     second_trade = Decimal(order['cost'])
 
-    # Use the entire cost of second trade for the third order
-    third_trade = second_trade * (1 - Decimal(fee))
+    # Third order with fees
+    third_trade = second_trade * third_price * (1 - Decimal(fee))
 
-    # Place third order
     print(f'Placing third order: {third_trade} {third_symbol}')
     order = await exchange.create_order(third_symbol, 'market', 'sell', float(third_trade))
     order_id = order['id']
@@ -123,18 +122,12 @@ async def execute_trade(exchange, first_symbol, second_symbol, third_symbol, tic
             break
         await asyncio.sleep(1)
     
-    # Fetch final balance
     balance = await exchange.fetch_balance()
     final_amount = balance['free']['USDT']
 
-    # Calculate profit/loss
     profit = final_amount - initial_amount
-
     print(f'Trade completed: Initial amount: {initial_amount}, Final amount: {final_amount}, Profit: {profit}')
-
-    # return profit and final amount if needed for further calculations or logging
-    return profit,  final_amount
-
+    return profit, final_amount
 
 # Function for calculating the price impact of the order based on the orderbook asks, bids, and volumes
 async def calculate_price_impact(exchange, symbols, order_sizes, sides):
@@ -145,16 +138,16 @@ async def calculate_price_impact(exchange, symbols, order_sizes, sides):
     logging.info(f'Order books fetched on {exchange}')
     price_impacts = []
 
+    slippage_margin = Decimal("0.001")  # Ajouter une marge pour le slippage
+
     for i in range(len(symbols)):
         symbol = symbols[i]
         side = sides[i]
         order_size = float(order_sizes[i])
         order_book = order_books[i]
         
-        # If we're buying, we need to look at the asks. If we're selling, we need to look at the bids.
         orders = np.array(order_book['asks']) if side == 'buy' else np.array(order_book['bids'])
 
-        # Slice orders into prices and volumes
         prices, volumes = orders[:,0], orders[:,1]
 
         logging.info(f'Processing order book for {symbol} with side {side} and order size {order_size}')
@@ -190,6 +183,8 @@ async def calculate_price_impact(exchange, symbols, order_sizes, sides):
 async def find_triangular_arbitrage_opportunities(exchange, markets, tickers, exchange_name, fee, initial_amount ):    
     
     logging.info('Finding arbitrage opportunities.')
+    min_liquidity = Decimal("10000")  # Seuil minimal de liquidité
+    
     # Read existing trades from CSV file
     csv_file = 'tri_arb_opportunities.csv'
     
@@ -295,7 +290,7 @@ async def find_triangular_arbitrage_opportunities(exchange, markets, tickers, ex
                 opportunities = []
 
                 
-                if profit_percentage > 0.08:
+                if profit_percentage > 0.3:
                     logging.info(f'Arbitrage opportunity found. Checking liquidity on {exchange_name}...')
                     print(f'\rArbitrage opportunities found, checking liquidity', end='\r')
                     
@@ -354,7 +349,7 @@ async def find_triangular_arbitrage_opportunities(exchange, markets, tickers, ex
                         real_profit_percentage = (real_profit / initial_amount) * 100
 
                         logging.info(f'After liquidity check on {exchange_name}: first_symbol= {first_symbol}, first_price = {first_price_impact}, second_symbol = {second_symbol} second_price = {second_price_impact}, third_symbol = {third_symbol}, third_price = {third_price_impact}, profit percentage: {real_profit_percentage}')
-                        if real_profit_percentage > 0.08:
+                        if real_profit_percentage > 0.1:
                             
                             logging.info(f'Arbitrage opportunity confirmed on {exchange_name}.')
 
@@ -471,7 +466,7 @@ async def main():
 
             iteration_count += 1 # increment iteration counter
             
-            await asyncio.sleep(10) # sleep for 10 seconds before starting next iteration
+            await asyncio.sleep(5) # sleep for 10 seconds before starting next iteration
         
         except Exception as e:
             print(f'An error occurred: {e}')
