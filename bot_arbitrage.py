@@ -133,50 +133,60 @@ async def execute_trade(exchange, first_symbol, second_symbol, third_symbol, tic
 async def calculate_price_impact(exchange, symbols, order_sizes, sides):
     logging.info(f'Calculating price impact ')
     
-    # Fetch order books concurrently
-    order_books = await asyncio.gather(*[exchange.fetch_order_book(symbol) for symbol in symbols])
+    # Récupération des carnets d'ordres pour plusieurs symboles en parallèle avec une limite de 100
+    order_books = await asyncio.gather(
+        *[exchange.fetch_order_book(symbol, limit=100) for symbol in symbols]
+    )
     logging.info(f'Order books fetched on {exchange}')
+    
     price_impacts = []
-
-    slippage_margin = Decimal("0.001")  # Ajouter une marge pour le slippage
+    slippage_margin = Decimal("0.002")  # Marge de slippage par défaut
+    min_volume_threshold = Decimal("0.0001")  # Filtrer les niveaux avec un volume très faible
 
     for i in range(len(symbols)):
         symbol = symbols[i]
         side = sides[i]
-        order_size = float(order_sizes[i])
+        order_size = Decimal(order_sizes[i])
         order_book = order_books[i]
         
-        orders = np.array(order_book['asks']) if side == 'buy' else np.array(order_book['bids'])
-
-        prices, volumes = orders[:,0], orders[:,1]
-
-        logging.info(f'Processing order book for {symbol} with side {side} and order size {order_size}')
-        logging.info(f'Order book prices: {prices}')
-        logging.info(f'Order book volumes: {volumes}')
-
-        total_value = 0
+        prices, volumes = np.array(order_book['asks' if side == 'buy' else 'bids']).T
+        total_cost = 0
         total_volume = 0
+        remaining_order_size = order_size
+
+        # Calculer le spread entre le bid et l'ask pour ajuster dynamiquement le slippage
+        best_bid = order_book['bids'][0][0]
+        best_ask = order_book['asks'][0][0]
+        spread = (best_ask - best_bid) / best_ask
+        dynamic_slippage = max(Decimal("0.002"), Decimal(spread) * 2)  # Slippage ajusté
 
         for j in range(len(prices)):
-            if order_size > 0:
-                volume_for_this_order = min(volumes[j], order_size)
-                value_for_this_order = volume_for_this_order * prices[j]
+            price = Decimal(prices[j])
+            volume_available = Decimal(volumes[j])
+            
+            if volume_available < min_volume_threshold:
+                logging.info(f'Volume at price {price} for {symbol} is too low, skipping this level')
+                continue  # Ignore les niveaux avec un volume très faible
 
-                logging.info(f'At price level {prices[j]}: volume_for_this_order={volume_for_this_order}, value_for_this_order={value_for_this_order}')
+            if remaining_order_size <= volume_available:
+                total_cost += remaining_order_size * price
+                total_volume += remaining_order_size
+                break  # L'ordre est complètement exécuté
+            else:
+                logging.info(f'Not enough volume at price {price} for {symbol}, moving to next level')
+                total_cost += volume_available * price
+                total_volume += volume_available
+                remaining_order_size -= volume_available  # Réduit la taille restante de l'ordre
 
-                total_value += value_for_this_order
-                total_volume += volume_for_this_order
-                order_size -= volume_for_this_order
-
-        if order_size <= 0:
-            # Calculate price impact
-            price_impact = total_value / total_volume if total_volume != 0 else None
+        if total_volume > 0:
+            price_impact = total_cost / total_volume  # Calcul du prix moyen pondéré
+            price_impact = price_impact * (1 + dynamic_slippage) if side == 'buy' else price_impact * (1 - dynamic_slippage)
             logging.info(f'Price impact for {symbol}: {price_impact}')
             price_impacts.append(price_impact)
         else:
-            # If order size was not completely filled, price impact can't be calculated
-            price_impacts.append(None)
-    
+            logging.warning(f'Insufficient liquidity for {symbol}')
+            price_impacts.append(None)  # Marque comme non viable
+
     return price_impacts
 
 #Function for finding triangular arbitrage opportunities for each exchange
@@ -290,7 +300,7 @@ async def find_triangular_arbitrage_opportunities(exchange, markets, tickers, ex
                 opportunities = []
 
                 
-                if profit_percentage > 0.3:
+                if profit_percentage > 0.8:
                     logging.info(f'Arbitrage opportunity found. Checking liquidity on {exchange_name}...')
                     print(f'\rArbitrage opportunities found, checking liquidity', end='\r')
                     
@@ -466,7 +476,7 @@ async def main():
 
             iteration_count += 1 # increment iteration counter
             
-            await asyncio.sleep(5) # sleep for 10 seconds before starting next iteration
+            await asyncio.sleep(3) # sleep for 3 seconds before starting next iteration
         
         except Exception as e:
             print(f'An error occurred: {e}')
