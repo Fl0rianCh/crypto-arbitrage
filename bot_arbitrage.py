@@ -69,53 +69,54 @@ def stop_command(update: Update, context: CallbackContext):
 
 
 # Function for executing trades
-async def execute_trade(exchange, first_symbol, second_symbol, third_symbol, tickers, initial_amount, fee, first_tick_size, second_tick_size, third_tick_size):
-
-    # Use adjusted trades (including fee)
+async def execute_trade(exchange, first_symbol, second_symbol, third_symbol, tickers, initial_amount, first_tick_size, second_tick_size, third_tick_size):
+    # Calculate the amount for the first trade (buying the first asset)
     first_price = Decimal(tickers[first_symbol]['ask'])
-    first_trade = (initial_amount / first_price) * (1 - Decimal(fee))
+    first_trade = initial_amount / first_price
     first_trade = first_trade.quantize(Decimal(str(first_tick_size)), rounding=ROUND_DOWN)
 
-    # Place first order
+    # Place the first order to buy the first asset
     print(f'\nPlacing first order: {first_trade} {first_symbol}')
     order = await exchange.create_order(first_symbol, 'market', 'buy', float(first_trade))
     order_id = order['id']
 
-    # Wait for first order to be filled
+    # Wait for the first order to be filled
     while True:
         order = await exchange.fetch_order(order_id, first_symbol)
         if order['status'] == 'closed':
             break
         await asyncio.sleep(1)
 
-    # Retrieve actual amount of first trading pair bought
+    # Retrieve the actual amount bought in the first trade
     first_trade = Decimal(order['filled'])
 
-    # Use the entire amount of first trade for the second order
+    # Use the entire amount from the first trade for the second trade (selling for the second asset)
     second_trade = first_trade
 
-    # Place second order
-    second_trade = second_trade * (1 - Decimal(fee))
+    # Place the second order to sell the first asset for the second asset
     print(f'Placing second order: {second_trade} {second_symbol}')
     order = await exchange.create_order(second_symbol, 'market', 'sell', float(second_trade))
     order_id = order['id']
 
-   # Wait for second order to be filled
+    # Wait for the second order to be filled
     while True:
         order = await exchange.fetch_order(order_id, second_symbol)
         if order['status'] == 'closed':
             break
         await asyncio.sleep(1)
 
+    # Retrieve the amount received in the second trade
     second_trade = Decimal(order['cost'])
 
-    # Third order with fees
-    third_trade = second_trade * third_price * (1 - Decimal(fee))
+    # Use the amount from the second trade for the third trade (selling for USDT)
+    third_trade = second_trade
 
+    # Place the third order to sell the second asset for USDT
     print(f'Placing third order: {third_trade} {third_symbol}')
     order = await exchange.create_order(third_symbol, 'market', 'sell', float(third_trade))
     order_id = order['id']
 
+    # Wait for the third order to be filled
     while True:
         order = await exchange.fetch_order(order_id, third_symbol)
         if order['status'] == 'closed':
@@ -125,23 +126,26 @@ async def execute_trade(exchange, first_symbol, second_symbol, third_symbol, tic
     balance = await exchange.fetch_balance()
     final_amount = balance['free']['USDT']
 
-    profit = final_amount - initial_amount
+    # Calculate profit including fees
+    fee = Decimal('0.001')  # Assuming a 0.1% fee per trade
+    total_fee = (first_trade * first_price * fee) + (second_trade * first_price * fee) + (third_trade * first_price * fee)
+    profit = final_amount - initial_amount - total_fee
     print(f'Trade completed: Initial amount: {initial_amount}, Final amount: {final_amount}, Profit: {profit}')
     return profit, final_amount
 
 # Function for calculating the price impact of the order based on the orderbook asks, bids, and volumes
 async def calculate_price_impact(exchange, symbols, order_sizes, sides):
-    logging.info(f'Calculating price impact ')
+    logging.info(f'Calculating price impact')
     
-    # Récupération des carnets d'ordres pour plusieurs symboles en parallèle avec une limite de 100
+    # Fetch order books for multiple symbols in parallel with a limit of 100 orders per book
     order_books = await asyncio.gather(
         *[exchange.fetch_order_book(symbol, limit=100) for symbol in symbols]
     )
     logging.info(f'Order books fetched on {exchange}')
     
     price_impacts = []
-    slippage_margin = Decimal("0.002")  # Marge de slippage par défaut
-    min_volume_threshold = Decimal("0.0001")  # Filtrer les niveaux avec un volume très faible
+    slippage_margin = Decimal("0.002")  # Default slippage margin
+    min_volume_threshold = Decimal("0.0001")  # Filter levels with very low volume
 
     for i in range(len(symbols)):
         symbol = symbols[i]
@@ -149,52 +153,54 @@ async def calculate_price_impact(exchange, symbols, order_sizes, sides):
         order_size = Decimal(order_sizes[i])
         order_book = order_books[i]
         
+        # Extract prices and volumes from the order book
         prices, volumes = np.array(order_book['asks' if side == 'buy' else 'bids']).T
         total_cost = 0
         total_volume = 0
         remaining_order_size = order_size
 
-        # Calculer le spread entre le bid et l'ask pour ajuster dynamiquement le slippage
+        # Calculate the spread between the bid and ask to adjust slippage dynamically
         best_bid = order_book['bids'][0][0]
         best_ask = order_book['asks'][0][0]
         spread = (best_ask - best_bid) / best_ask
-        dynamic_slippage = max(Decimal("0.002"), Decimal(spread) * 2)  # Slippage ajusté
+        dynamic_slippage = max(Decimal("0.002"), Decimal(spread) * 2)  # Adjusted slippage
 
+        # Iterate through the price levels to calculate the total cost for the required order size
         for j in range(len(prices)):
             price = Decimal(prices[j])
             volume_available = Decimal(volumes[j])
             
             if volume_available < min_volume_threshold:
                 logging.info(f'Volume at price {price} for {symbol} is too low, skipping this level')
-                continue  # Ignore les niveaux avec un volume très faible
+                continue  # Skip levels with very low volume
 
             if remaining_order_size <= volume_available:
                 total_cost += remaining_order_size * price
                 total_volume += remaining_order_size
-                break  # L'ordre est complètement exécuté
+                break  # The order is completely executed
             else:
                 logging.info(f'Not enough volume at price {price} for {symbol}, moving to next level')
                 total_cost += volume_available * price
                 total_volume += volume_available
-                remaining_order_size -= volume_available  # Réduit la taille restante de l'ordre
+                remaining_order_size -= volume_available  # Reduce the remaining order size
 
         if total_volume > 0:
-            price_impact = total_cost / total_volume  # Calcul du prix moyen pondéré
+            # Calculate the weighted average price considering slippage
+            price_impact = total_cost / total_volume
             price_impact = price_impact * (1 + dynamic_slippage) if side == 'buy' else price_impact * (1 - dynamic_slippage)
             logging.info(f'Price impact for {symbol}: {price_impact}')
             price_impacts.append(price_impact)
         else:
             logging.warning(f'Insufficient liquidity for {symbol}')
-            price_impacts.append(None)  # Marque comme non viable
+            price_impacts.append(None)  # Mark as not viable
 
     return price_impacts
 
 #Function for finding triangular arbitrage opportunities for each exchange
-async def find_triangular_arbitrage_opportunities(exchange, markets, tickers, exchange_name, fee, initial_amount ):    
-    
+async def find_triangular_arbitrage_opportunities(exchange, markets, tickers, exchange_name, fee, initial_amount):
     logging.info('Finding arbitrage opportunities.')
     min_liquidity = Decimal("10000")  # Seuil minimal de liquidité
-    
+
     # Read existing trades from CSV file
     csv_file = 'tri_arb_opportunities.csv'
     
@@ -203,32 +209,32 @@ async def find_triangular_arbitrage_opportunities(exchange, markets, tickers, ex
         tri_arb_opportunities = df.to_dict('records')
     else:
         tri_arb_opportunities = []
-    
+
     # Add a new variable to keep track of the last time a trade was added to the CSV file for each trading pair
     last_trade_time = {}
-    
-    #load markets data
+
+    # Load markets data
     markets = await exchange.load_markets(True)
     symbols = list(markets.keys())
     tickers = await exchange.fetch_tickers()
-    
+
     # Create a dictionary with all the USDT symbols
     usdt_symbols = {symbol for symbol in markets.keys() if symbol.endswith('/USDT')}
     symbols_by_base = {}
-    
+
     for symbol in markets.keys():
         base, quote = symbol.split('/')
         if base not in symbols_by_base:
             symbols_by_base[base] = set()
         symbols_by_base[base].add(symbol)
-    
+
     # Split the first symbol in base and quote
     for usdt_symbol in usdt_symbols:
         first_symbol = usdt_symbol
         base, quote = usdt_symbol.split('/')
         second_base = base
         second_symbols = symbols_by_base.get(second_base, set())
-        
+
         # Loop to find all the possible second symbols
         for second_symbol in second_symbols:
             unavailable_pairs = {'YGG/BNB', 'RAD/BNB', 'VOXEL/BNB', 'GLMR/BNB', 'UNI/EUR'}
@@ -239,34 +245,34 @@ async def find_triangular_arbitrage_opportunities(exchange, markets, tickers, ex
                 third_base = quote
             else:
                 third_base = base
-            # Third symbol 
+            # Third symbol
             third_symbol = f'{third_base}/USDT'
-            
+
             # Check if trading pairs are valid on the exchange
             if third_symbol in markets and first_symbol in markets and second_symbol in markets:
-                
+
                 # Retrieve tick size for all trading pairs
                 market = exchange.markets
-                
+
                 first_market = market[first_symbol]
                 first_tick_size = first_market['precision']['price']
-                
+
                 second_market = market[second_symbol]
                 second_tick_size = second_market['precision']['price']
-                
+
                 third_market = market[third_symbol]
                 third_tick_size = third_market['precision']['price']
-                
+
                 if any(symbol not in tickers for symbol in [first_symbol, second_symbol, third_symbol]):
                     continue
-                
+
                 if all(tickers[symbol].get('ask') is not None for symbol in [first_symbol]) and all(tickers[symbol].get('bid') is not None for symbol in [second_symbol, third_symbol]):
                     first_price = Decimal(tickers[first_symbol]['ask'])
                     second_price = Decimal(tickers[second_symbol]['bid'])
                     third_price = Decimal(tickers[third_symbol]['bid'])
                 else:
-                    continue 
-                    
+                    continue
+
                 # Quantize the prices
                 first_price = first_price.quantize(Decimal(str(first_tick_size)), rounding=ROUND_DOWN)
                 second_price = second_price.quantize(Decimal(str(second_tick_size)), rounding=ROUND_DOWN)
@@ -279,10 +285,10 @@ async def find_triangular_arbitrage_opportunities(exchange, markets, tickers, ex
                 if first_price == 0 or second_price == 0 or third_price == 0:
                     continue
 
-                #Trades calculation
+                # Trades calculation
                 first_trade = initial_amount / first_price
                 first_trade = first_trade.quantize(Decimal(str(first_tick_size)), rounding=ROUND_DOWN)
-                
+
                 second_trade = first_trade * second_price
                 second_trade = second_trade.quantize(Decimal(str(second_tick_size)), rounding=ROUND_DOWN)
 
@@ -292,18 +298,31 @@ async def find_triangular_arbitrage_opportunities(exchange, markets, tickers, ex
                 # Check for negative trades
                 if first_trade < 0 or second_trade < 0 or third_trade < 0:
                     continue
-                
-                # Calculate profits        
+
+                # Simple liquidity check
+                order_books = await asyncio.gather(
+                    exchange.fetch_order_book(first_symbol, limit=100),
+                    exchange.fetch_order_book(second_symbol, limit=100),
+                    exchange.fetch_order_book(third_symbol, limit=100)
+                )
+
+                first_order_book, second_order_book, third_order_book = order_books
+
+                # Check if there's enough liquidity in the order books for the trades
+                if first_order_book['asks'][0][1] < float(first_trade) or second_order_book['bids'][0][1] < float(first_trade) or third_order_book['bids'][0][1] < float(second_trade):
+                    logging.info(f'Not enough liquidity for arbitrage on {exchange_name}: {first_symbol}, {second_symbol}, {third_symbol}')
+                    continue
+
+                # Calculate profits
                 profit = third_trade - initial_amount
                 profit_percentage = (profit / initial_amount) * 100
-                
+
                 opportunities = []
 
-                
                 if profit_percentage > 0.8:
                     logging.info(f'Arbitrage opportunity found. Checking liquidity on {exchange_name}...')
                     print(f'\rArbitrage opportunities found, checking liquidity', end='\r')
-                    
+
                     opportunities.append({
                         'first_symbol': first_symbol,
                         'second_symbol': second_symbol,
@@ -321,104 +340,58 @@ async def find_triangular_arbitrage_opportunities(exchange, markets, tickers, ex
                     # Take the top 1 or 2 opportunities
                     top_opportunities = opportunities[:1]  # Change this to the number of opportunities you want to process
 
-                    # Calculate price impacts for top opportunities
                     for opportunity in top_opportunities:
-                         # Log prices before checking opportunity
-                        logging.info(f'Before opportunity check on {exchange_name}: first_symbol= {first_symbol}, first_price = {first_price}, second_symbol = {second_symbol} second_price = {second_price}, third_symbol = {third_symbol}, third_price = {third_price}, profit percentage: {profit_percentage}')
-
-                        price_impacts = await calculate_price_impact(
+                        # Execute trades
+                        profit, final_amount = await execute_trade(
                             exchange,
-                            [opportunity['first_symbol'], opportunity['second_symbol'], opportunity['third_symbol']],
-                            [initial_amount, opportunity['first_trade'], opportunity['second_trade']],
-                            ['buy', 'sell', 'sell']
+                            first_symbol,
+                            second_symbol,
+                            third_symbol,
+                            tickers,
+                            initial_amount,
+                            fee,
+                            first_tick_size,
+                            second_tick_size,
+                            third_tick_size
                         )
 
-                        # Unpack the results
-                        first_price_impact, second_price_impact, third_price_impact = price_impacts
+                        print(f'Profitable trade found on {exchange_name}: {first_symbol} -> {second_symbol} -> {third_symbol}. Profit percentage: {profit_percentage:.2f}%')
 
-                        # Quantize the price impacts
-                        first_price_impact = Decimal(first_price_impact).quantize(Decimal(str(first_tick_size)), rounding=ROUND_UP)
-                        second_price_impact = Decimal(second_price_impact).quantize(Decimal(str(second_tick_size)), rounding=ROUND_DOWN)
-                        third_price_impact = Decimal(third_price_impact).quantize(Decimal(str(third_tick_size)), rounding=ROUND_DOWN)
+                        trade_key = f'{exchange_name}-{first_symbol}-{second_symbol}-{third_symbol}'
+                        current_time = time.time()
+                        last_message_time = last_message_times.get(trade_key, 0)
+                        time_since_last_message = current_time - last_message_time
 
-                        # Calculate trades considering price impact and including fees
-                        first_trade_before_fees = initial_amount / first_price_impact 
-                        first_trade_amount = first_trade_before_fees * ( 1- Decimal(fee))
-                        first_trade_amount = first_trade_amount.quantize(Decimal(str(first_tick_size)), rounding=ROUND_DOWN)
+                        if time_since_last_message > min_message_interval:
+                            message_text = f'Profitable trade found on {exchange_name}: {first_symbol} -> {second_symbol} -> {third_symbol}. Profit: {profit:.2f}. Profit percentage: {profit_percentage:.2f}%'
+                            await send_message(bot_token, chat_id, message_text)
+                            last_message_times[trade_key] = current_time
 
-                        second_trade_before_fees = first_trade_amount * second_price_impact
-                        second_trade_amount = second_trade_before_fees * (1 - Decimal(fee))  
-                        second_trade_amount = second_trade_amount.quantize(Decimal(str(second_tick_size)), rounding=ROUND_DOWN)
+                        # Check if a trade for the same trading pair has been added to the CSV file within the last minute
+                        last_trade_time_for_pair = last_trade_time.get(trade_key, 0)
+                        time_since_last_trade = current_time - last_trade_time_for_pair
 
-                        third_trade_before_fees = second_trade_amount * third_price_impact
-                        third_trade_amount = third_trade_before_fees * (1 - Decimal(fee))  
-                        third_trade_amount = third_trade_amount.quantize(Decimal(str(third_tick_size)), rounding=ROUND_DOWN)
+                        # If a trade for the same trading pair has not been added to the CSV file within the last 5 minutes,
+                        # append trade_data to trades list and update last_trade_time[trade_key] with current time
+                        if time_since_last_trade > 300:
+                            trade_data = {
+                                'exchange': exchange_name,
+                                'order size (USDT)': initial_amount,
+                                'first_symbol': first_symbol,
+                                'second_symbol': second_symbol,
+                                'third_symbol': third_symbol,
+                                'first_price': first_price,
+                                'second_price': second_price,
+                                'third_price': third_price,
+                                'profit_percentage': profit_percentage,
+                                'time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                            }
+                            tri_arb_opportunities.append(trade_data)
+                            last_trade_time[trade_key] = current_time
 
-                        # Check real profit after price impact calculation and fees
-                        real_profit = third_trade_amount - initial_amount
-                        real_profit_percentage = (real_profit / initial_amount) * 100
-
-                        logging.info(f'After liquidity check on {exchange_name}: first_symbol= {first_symbol}, first_price = {first_price_impact}, second_symbol = {second_symbol} second_price = {second_price_impact}, third_symbol = {third_symbol}, third_price = {third_price_impact}, profit percentage: {real_profit_percentage}')
-                        if real_profit_percentage > 0.1:
-                            
-                            logging.info(f'Arbitrage opportunity confirmed on {exchange_name}.')
-
-                            # call execute trades
-                            profit, final_amount = await execute_trade(
-                                exchange,
-                                first_symbol,
-                                second_symbol,
-                                third_symbol,
-                                tickers,
-                                initial_amount ,
-                                fee,
-                                first_tick_size,
-                                second_tick_size,
-                                third_tick_size
-                            )
-                                
-                            print(f'Profitable trade found on {exchange_name}: {first_symbol} -> {second_symbol} -> {third_symbol}. Profit percentage: {real_profit_percentage:.2f}%', 'Profit change after checks: ', real_profit-profit, ' USDT')
-
-                            trade_key = f'{exchange_name}-{first_symbol}-{second_symbol}-{third_symbol}'
-                            current_time = time.time()
-                            last_message_time = last_message_times.get(trade_key, 0)
-                            time_since_last_message = current_time - last_message_time
-
-                            if time_since_last_message > min_message_interval:
-                                message_text = f'Profitable trade found on {exchange_name}: {first_symbol} -> {second_symbol} -> {third_symbol}. Profit: {profit:.2f}. Profit percentage: {profit_percentage:.2f}%'
-                                await send_message(bot_token, chat_id, message_text)
-                                last_message_times[trade_key] = current_time
-
-                            # Check if a trade for the same trading pair has been added to the CSV file within the last minute
-                            last_trade_time_for_pair= last_trade_time.get(trade_key, 0)
-                            time_since_last_trade= current_time - last_trade_time_for_pair
-
-                            # If a trade for the same trading pair has not been added to the CSV file within the last  5 minute,
-                            # append trade_data to trades list and update last_trade_time[trade_key] with current time
-                            if time_since_last_trade> 300:
-                                trade_data= {
-                                    'exchange': exchange_name,
-                                    'order size (USDT)': initial_amount,
-                                    'first_symbol': first_symbol,
-                                    'second_symbol': second_symbol,
-                                    'third_symbol': third_symbol,
-                                    'first_price': first_price_impact,
-                                    'second_price': second_price_impact,
-                                    'third_price': third_price_impact,
-                                    'profit_percentage': real_profit_percentage,
-                                    'time':  datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                                }
-                                tri_arb_opportunities.append(trade_data)
-                                last_trade_time[trade_key]= current_time
-                        else:
-                            logging.info(f'Arbitrage opportunity not confirmed on {exchange_name}.')
-                            # Print arbitrage opportunity message
-                            print(f'\rArbitrage opportunities found, checking liquidity | Opportunities not confirmed', end='\r')     
-
-    # Write updated trades to CSV and Excell file
-    df= pd.DataFrame(tri_arb_opportunities)
-    df.to_csv(csv_file, index=False)
-    
+    # Write updated trades to CSV file
+    df = pd.DataFrame(tri_arb_opportunities)
+    df.to_csv(csv_file, index=False)    
 
 async def main():
     
