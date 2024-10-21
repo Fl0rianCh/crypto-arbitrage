@@ -301,9 +301,9 @@ async def find_triangular_arbitrage_opportunities(exchange, markets, tickers, ex
 
                 # Improved liquidity check across multiple levels
                 order_books = await asyncio.gather(
-                    exchange.fetch_order_book(first_symbol, limit=50),
-                    exchange.fetch_order_book(second_symbol, limit=50),
-                    exchange.fetch_order_book(third_symbol, limit=50)
+                    exchange.fetch_order_book(first_symbol, limit=100),
+                    exchange.fetch_order_book(second_symbol, limit=100),
+                    exchange.fetch_order_book(third_symbol, limit=100)
                 )
 
                 first_order_book, second_order_book, third_order_book = order_books
