@@ -308,15 +308,22 @@ async def find_triangular_arbitrage_opportunities(exchange, markets, tickers, ex
 
                 first_order_book, second_order_book, third_order_book = order_books
 
-                def is_liquidity_sufficient(order_book, required_amount, side):
-                    total_volume = Decimal(0)
-                    levels = order_book['asks' if side == 'buy' else 'bids']
+                def is_liquidity_sufficient(order_book, required_volume, side):
+                    logging.info(f'Checking liquidity sufficiency for side: {side}')
+                    # Extract the levels from the order book based on the side ('asks' for buying, 'bids' for selling)
+                    levels = order_book['asks'] if side == 'buy' else order_book['bids']
 
-                    for price, volume in levels:
+                    total_volume = Decimal('0')
+                    for level in levels:
+                        # Only consider the first two elements: price and volume
+                        price, volume = level[:2]
+
                         total_volume += Decimal(volume)
-                        if total_volume >= required_amount:
+                        if total_volume >= required_volume:
                             return True
+
                     return False
+
 
                 # Check if there's enough liquidity in the order books for the trades
                 if (not is_liquidity_sufficient(first_order_book, first_trade, 'buy') or
