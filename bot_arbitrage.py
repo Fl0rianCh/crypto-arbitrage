@@ -299,17 +299,29 @@ async def find_triangular_arbitrage_opportunities(exchange, markets, tickers, ex
                 if first_trade < 0 or second_trade < 0 or third_trade < 0:
                     continue
 
-                # Simple liquidity check
+                # Improved liquidity check across multiple levels
                 order_books = await asyncio.gather(
-                    exchange.fetch_order_book(first_symbol, limit=100),
-                    exchange.fetch_order_book(second_symbol, limit=100),
-                    exchange.fetch_order_book(third_symbol, limit=100)
+                    exchange.fetch_order_book(first_symbol, limit=50),
+                    exchange.fetch_order_book(second_symbol, limit=50),
+                    exchange.fetch_order_book(third_symbol, limit=50)
                 )
 
                 first_order_book, second_order_book, third_order_book = order_books
 
+                def is_liquidity_sufficient(order_book, required_amount, side):
+                    total_volume = Decimal(0)
+                    levels = order_book['asks' if side == 'buy' else 'bids']
+
+                    for price, volume in levels:
+                        total_volume += Decimal(volume)
+                        if total_volume >= required_amount:
+                            return True
+                    return False
+
                 # Check if there's enough liquidity in the order books for the trades
-                if first_order_book['asks'][0][1] < float(first_trade) or second_order_book['bids'][0][1] < float(first_trade) or third_order_book['bids'][0][1] < float(second_trade):
+                if (not is_liquidity_sufficient(first_order_book, first_trade, 'buy') or
+                        not is_liquidity_sufficient(second_order_book, first_trade, 'sell') or
+                        not is_liquidity_sufficient(third_order_book, second_trade, 'sell')):
                     logging.info(f'Not enough liquidity for arbitrage on {exchange_name}: {first_symbol}, {second_symbol}, {third_symbol}')
                     continue
 
@@ -320,8 +332,8 @@ async def find_triangular_arbitrage_opportunities(exchange, markets, tickers, ex
                 opportunities = []
 
                 if profit_percentage > 0.8:
-                    logging.info(f'Arbitrage opportunity found. Checking liquidity on {exchange_name}...')
-                    print(f'\rArbitrage opportunities found, checking liquidity', end='\r')
+                    logging.info(f'Arbitrage opportunity found. Executing trades on {exchange_name}...')
+                    print(f'\rArbitrage opportunities found, executing trades', end='\r')
 
                     opportunities.append({
                         'first_symbol': first_symbol,
@@ -337,8 +349,8 @@ async def find_triangular_arbitrage_opportunities(exchange, markets, tickers, ex
                     # Sort opportunities by profit percentage in descending order
                     opportunities.sort(key=lambda x: -x['profit_percentage'])
 
-                    # Take the top 1 or 2 opportunities
-                    top_opportunities = opportunities[:1]  # Change this to the number of opportunities you want to process
+                    # Take the top 1 opportunity
+                    top_opportunities = opportunities[:1]
 
                     for opportunity in top_opportunities:
                         # Execute trades
@@ -349,7 +361,6 @@ async def find_triangular_arbitrage_opportunities(exchange, markets, tickers, ex
                             third_symbol,
                             tickers,
                             initial_amount,
-                            fee,
                             first_tick_size,
                             second_tick_size,
                             third_tick_size
@@ -367,12 +378,10 @@ async def find_triangular_arbitrage_opportunities(exchange, markets, tickers, ex
                             await send_message(bot_token, chat_id, message_text)
                             last_message_times[trade_key] = current_time
 
-                        # Check if a trade for the same trading pair has been added to the CSV file within the last minute
+                        # Record the trade
                         last_trade_time_for_pair = last_trade_time.get(trade_key, 0)
                         time_since_last_trade = current_time - last_trade_time_for_pair
 
-                        # If a trade for the same trading pair has not been added to the CSV file within the last 5 minutes,
-                        # append trade_data to trades list and update last_trade_time[trade_key] with current time
                         if time_since_last_trade > 300:
                             trade_data = {
                                 'exchange': exchange_name,
@@ -391,7 +400,7 @@ async def find_triangular_arbitrage_opportunities(exchange, markets, tickers, ex
 
     # Write updated trades to CSV file
     df = pd.DataFrame(tri_arb_opportunities)
-    df.to_csv(csv_file, index=False)    
+    df.to_csv(csv_file, index=False)   
 
 async def main():
     
