@@ -9,7 +9,7 @@ from telegram import Bot
 load_dotenv('config.env')
 
 # Configurations
-INVESTMENT = Decimal('300')  # EUR initial investment
+INVESTMENT = Decimal('250')  # EUR initial investment
 GRID_LEVELS = 10  # Number of grid levels
 GRID_SPACING_PERCENT = Decimal('1.5')  # Grid spacing as a percentage of the price
 STOP_LOSS_PERCENT = Decimal('10')  # Stop-loss at 10% below initial investment
@@ -51,7 +51,7 @@ def send_telegram_message(message):
     except Exception as e:
         logger.error(f"Failed to send Telegram message: {e}")
 
-# Function to place limit orders at grid levels
+# Function to place limit orders at grid levels and execute them
 def place_grid_orders(current_price, trading_pair, balance):
     grid_orders = []
     base_order_size = balance / (GRID_LEVELS * current_price)
@@ -76,23 +76,33 @@ def place_grid_orders(current_price, trading_pair, balance):
         }
         grid_orders.append(order)
 
+        # Execute the order immediately and verify placement
+        execute_order(order)
+
     return grid_orders
 
-# Function to execute a limit order
+# Function to execute a limit order and track its status
 def execute_order(order):
     try:
         if order['type'] == 'buy':
-            exchange.create_limit_buy_order(order['symbol'], order['size'], order['price'])
+            response = exchange.create_limit_buy_order(order['symbol'], order['size'], order['price'])
         else:
-            exchange.create_limit_sell_order(order['symbol'], order['size'], order['price'])
+            response = exchange.create_limit_sell_order(order['symbol'], order['size'], order['price'])
         logger.info(f"{order['type'].capitalize()} order placed: {order}")
         send_telegram_message(f"{order['type'].capitalize()} order placed: {order}")
+        return response['id']
     except Exception as e:
         logger.error(f"Failed to place {order['type']} order: {order}, Error: {e}")
         send_telegram_message(f"Failed to place {order['type']} order: {order}, Error: {e}")
+        return None
 
 # Function to check stop-loss or take-profit
 def check_stop_take_profit(current_price, trading_pair, balance):
+    open_orders = exchange.fetch_open_orders(trading_pair)
+    if not open_orders:
+        logger.info(f"No open positions for {trading_pair}. Skipping stop-loss and take-profit check.")
+        return False
+
     profit_target = balance * (1 + TAKE_PROFIT_PERCENT / 100)
     loss_limit = balance * (1 - STOP_LOSS_PERCENT / 100)
 
@@ -112,6 +122,9 @@ def check_stop_take_profit(current_price, trading_pair, balance):
 def close_all_positions(trading_pair):
     try:
         open_orders = exchange.fetch_open_orders(trading_pair)
+        if not open_orders:
+            logger.info(f"No open positions to close for {trading_pair}.")
+            return
         for order in open_orders:
             exchange.cancel_order(order['id'], trading_pair)
         logger.info(f"All positions closed for {trading_pair}.")
@@ -138,8 +151,6 @@ def main():
                     logger.error(f"No grid orders placed for {trading_pair} due to insufficient balance or other issues.")
                     send_telegram_message(f"No grid orders placed for {trading_pair}. Please review settings.")
                     continue
-                for order in orders:
-                    execute_order(order)
 
             # Sleep for a while before rechecking the market
             time.sleep(20)
