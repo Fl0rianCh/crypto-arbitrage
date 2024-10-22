@@ -23,8 +23,8 @@ TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 
 # Logger configuration
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
-logger = logging.getLogger(__name__)
+logging.basicConfig(filename='arbitrage.log', level=logging.INFO, format='%(asctime)s %(message)s')
+start_time = time.time()
 
 # Initialize Binance exchange
 exchange = ccxt.binance({
@@ -55,11 +55,19 @@ def send_telegram_message(message):
 def place_grid_orders(current_price, trading_pair, balance):
     grid_orders = []
     base_order_size = balance / (GRID_LEVELS * current_price)
-    
+
+    # Check if base order size meets the minimum requirement
+    market = exchange.market(trading_pair)
+    min_order_size = market['limits']['amount']['min']
+    if base_order_size < min_order_size:
+        logger.error(f"Base order size {base_order_size} is below the minimum required {min_order_size} for {trading_pair}.")
+        send_telegram_message(f"Base order size {base_order_size} is below the minimum required {min_order_size} for {trading_pair}. Adjusting grid levels or balance may be needed.")
+        return []
+
     for i in range(GRID_LEVELS):
         price = current_price * (1 + GRID_SPACING_PERCENT / 100) ** (i - GRID_LEVELS // 2)
         order_type = 'buy' if price < current_price else 'sell'
-        
+
         order = {
             'symbol': trading_pair,
             'price': round(price, 2),
@@ -119,16 +127,20 @@ def main():
             for trading_pair in TRADING_PAIRS:
                 ticker = exchange.fetch_ticker(trading_pair)
                 current_price = Decimal(ticker['last'])
-                
+
                 # Check for stop-loss or take-profit condition
                 if check_stop_take_profit(current_price, trading_pair, pair_balance):
                     continue
-                
+
                 # Place grid orders
                 orders = place_grid_orders(current_price, trading_pair, pair_balance)
+                if not orders:
+                    logger.error(f"No grid orders placed for {trading_pair} due to insufficient balance or other issues.")
+                    send_telegram_message(f"No grid orders placed for {trading_pair}. Please review settings.")
+                    continue
                 for order in orders:
                     execute_order(order)
-            
+
             # Sleep for a while before rechecking the market
             time.sleep(20)
         except Exception as e:
