@@ -9,8 +9,8 @@ from telegram import Bot
 load_dotenv('config.env')
 
 # Configurations
-INVESTMENT = Decimal('250')  # EUR initial investment
-GRID_LEVELS = 10  # Number of grid levels
+INVESTMENT = Decimal('300')  # EUR initial investment
+GRID_LEVELS = 5  # Number of grid levels
 GRID_SPACING_PERCENT = Decimal('1.5')  # Grid spacing as a percentage of the price
 STOP_LOSS_PERCENT = Decimal('10')  # Stop-loss at 10% below initial investment
 TAKE_PROFIT_PERCENT = Decimal('15')  # Take-profit at 15% above initial investment
@@ -34,7 +34,7 @@ exchange = ccxt.binance({
 })
 
 # Choose the trading pairs to operate on
-TRADING_PAIRS = ['BTC/USDC', 'ETH/USDC', 'BNB/USDC']  # Suitable high liquidity trading pairs
+TRADING_PAIRS = ['BTC/USDC']  # Suitable high liquidity trading pairs
 
 # Calculate the investment in USDC
 initial_balance = INVESTMENT  # Assuming EUR to USDC conversion is handled externally
@@ -74,14 +74,20 @@ def place_grid_orders(current_price, trading_pair, balance):
             'size': round(base_order_size, 6),
             'type': order_type
         }
+
+        # Ensure the order size meets the minimum requirement before placing
+        if order['size'] < min_order_size:
+            logger.error(f"Order size {order['size']} is below the minimum required {min_order_size} for {trading_pair}. Skipping this order.")
+            continue
+
         grid_orders.append(order)
 
-        # Execute the order immediately and verify placement
+        # Execute the order immediately
         execute_order(order)
 
     return grid_orders
 
-# Function to execute a limit order and track its status
+# Function to execute a limit order
 def execute_order(order):
     try:
         if order['type'] == 'buy':
@@ -90,11 +96,9 @@ def execute_order(order):
             response = exchange.create_limit_sell_order(order['symbol'], order['size'], order['price'])
         logger.info(f"{order['type'].capitalize()} order placed: {order}")
         send_telegram_message(f"{order['type'].capitalize()} order placed: {order}")
-        return response['id']
     except Exception as e:
         logger.error(f"Failed to place {order['type']} order: {order}, Error: {e}")
         send_telegram_message(f"Failed to place {order['type']} order: {order}, Error: {e}")
-        return None
 
 # Function to check stop-loss or take-profit
 def check_stop_take_profit(current_price, trading_pair, balance):
@@ -125,6 +129,7 @@ def close_all_positions(trading_pair):
         if not open_orders:
             logger.info(f"No open positions to close for {trading_pair}.")
             return
+
         for order in open_orders:
             exchange.cancel_order(order['id'], trading_pair)
         logger.info(f"All positions closed for {trading_pair}.")
