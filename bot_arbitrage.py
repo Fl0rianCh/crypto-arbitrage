@@ -23,8 +23,8 @@ TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 
 # Logger configuration
-logging.basicConfig(filename='arbitrage.log', level=logging.INFO, format='%(asctime)s %(message)s')
-start_time = time.time()
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s', filename='arbitrage.log')
+logger = logging.getLogger(__name__)
 
 # Initialize Binance exchange
 exchange = ccxt.binance({
