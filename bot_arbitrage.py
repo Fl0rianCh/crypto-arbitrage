@@ -6,6 +6,8 @@ from decimal import Decimal
 from dotenv import load_dotenv
 from telegram import Bot
 
+load_dotenv('config.env')
+
 # Configurations
 INVESTMENT = Decimal('300')  # EUR initial investment
 GRID_LEVELS = 10  # Number of grid levels
@@ -14,11 +16,9 @@ STOP_LOSS_PERCENT = Decimal('10')  # Stop-loss at 10% below initial investment
 TAKE_PROFIT_PERCENT = Decimal('15')  # Take-profit at 15% above initial investment
 FEE_PERCENT = Decimal('0.1')  # Fee as 0.1% per trade on Binance
 
-# Load API keys from config.env file
-load_dotenv('config.env')
-
-BINANCE_API_KEY = os.environ.get('binance_api_key')
-BINANCE_SECRET_KEY = os.environ.get('binance_api_secret')
+# Load Binance API keys from environment
+BINANCE_API_KEY = os.getenv('BINANCE_API_KEY')
+BINANCE_SECRET_KEY = os.getenv('BINANCE_SECRET_KEY')
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 
