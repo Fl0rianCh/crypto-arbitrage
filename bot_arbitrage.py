@@ -9,11 +9,11 @@ from telegram import Bot
 load_dotenv('config.env')
 
 # Configurations
-INVESTMENT = Decimal('300')  # EUR initial investment
+INVESTMENT = Decimal('400')  # EUR initial investment
 GRID_LEVELS = 5  # Number of grid levels
 GRID_SPACING_PERCENT = Decimal('1.5')  # Grid spacing as a percentage of the price
 STOP_LOSS_PERCENT = Decimal('10')  # Stop-loss at 10% below initial investment
-TAKE_PROFIT_PERCENT = Decimal('15')  # Take-profit at 15% above initial investment
+TAKE_PROFIT_PERCENT = Decimal('20')  # Take-profit at 15% above initial investment
 FEE_PERCENT = Decimal('0.1')  # Fee as 0.1% per trade on Binance
 
 # Load Binance API keys from environment
@@ -54,31 +54,46 @@ def send_telegram_message(message):
 # Function to place limit orders at grid levels and execute them
 def place_grid_orders(current_price, trading_pair, balance):
     grid_orders = []
-    base_order_size = balance / (GRID_LEVELS * current_price)
-
-    # Check if base order size meets the minimum requirement
     market = exchange.market(trading_pair)
     min_order_size = market['limits']['amount']['min']
+
+    # Calculate the maximum possible order size per grid level
+    base_order_size = balance / GRID_LEVELS / current_price
+
+    # Ensure base order size meets the minimum requirement
     if base_order_size < min_order_size:
-        logger.error(f"Base order size {base_order_size} is below the minimum required {min_order_size} for {trading_pair}.")
+        logger.error(f"Base order size {base_order_size} is below the minimum required {min_order_size} for {trading_pair}. Adjusting grid levels or balance may be needed.")
         send_telegram_message(f"Base order size {base_order_size} is below the minimum required {min_order_size} for {trading_pair}. Adjusting grid levels or balance may be needed.")
         return []
 
-    for i in range(GRID_LEVELS):
-        price = current_price * (1 + GRID_SPACING_PERCENT / 100) ** (i - GRID_LEVELS // 2)
+    # Adjust the base order size to meet the minimum requirement if necessary
+    adjusted_order_size = max(base_order_size, min_order_size)
+    total_required_balance = adjusted_order_size * GRID_LEVELS * current_price
+
+    # If the total required balance exceeds the available balance, reduce the number of grid levels
+    if total_required_balance > balance:
+        logger.warning(f"Total required balance {total_required_balance} exceeds available balance {balance}. Reducing grid levels.")
+        send_telegram_message(f"Total required balance {total_required_balance} exceeds available balance {balance}. Reducing grid levels.")
+        max_levels = int(balance / (adjusted_order_size * current_price))
+        if max_levels < 1:
+            logger.error(f"Insufficient balance to place even a single order for {trading_pair}.")
+            send_telegram_message(f"Insufficient balance to place even a single order for {trading_pair}.")
+            return []
+        adjusted_grid_levels = min(GRID_LEVELS, max_levels)
+    else:
+        adjusted_grid_levels = GRID_LEVELS
+
+    # Place grid orders
+    for i in range(adjusted_grid_levels):
+        price = current_price * (1 + GRID_SPACING_PERCENT / 100) ** (i - adjusted_grid_levels // 2)
         order_type = 'buy' if price < current_price else 'sell'
 
         order = {
             'symbol': trading_pair,
             'price': round(price, 2),
-            'size': round(base_order_size, 6),
+            'size': round(adjusted_order_size, 6),
             'type': order_type
         }
-
-        # Ensure the order size meets the minimum requirement before placing
-        if order['size'] < min_order_size:
-            logger.error(f"Order size {order['size']} is below the minimum required {min_order_size} for {trading_pair}. Skipping this order.")
-            continue
 
         grid_orders.append(order)
 
