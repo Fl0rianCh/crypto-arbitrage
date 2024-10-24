@@ -64,9 +64,8 @@ def send_performance_report(frequency):
     roi = (total_profit / initial_balance) * 100
     report = (
         f"Performance Report:\n"
-        f"Report Frequency: {frequency // 3600} hours
-Uptime: {uptime}
-"
+        f"Report Frequency: {frequency // 3600} hours\n"
+        f"Uptime: {uptime}\n"
         f"Successful Trades: {successful_trades}\n"
         f"Failed Trades: {failed_trades}\n"
         f"Total Profit: {total_profit:.2f} USDC\n"
