@@ -173,11 +173,11 @@ def main():
                     continue
 
             # Sleep for a while before rechecking the market
-            time.sleep(20)
+            time.sleep(60)
         except Exception as e:
             logger.error(f"Error in main trading loop: {e}")
             send_telegram_message(f"Error in main trading loop: {e}")
-            time.sleep(20)
+            time.sleep(60)
 
 if __name__ == "__main__":
     main()
