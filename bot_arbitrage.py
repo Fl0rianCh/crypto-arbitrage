@@ -50,6 +50,7 @@ successful_trades = 0
 failed_trades = 0
 total_profit = Decimal('0')
 start_time = datetime.now()
+open_positions = {}  # Store open positions with their prices
 
 # Function to send Telegram notifications
 def send_telegram_message(message):
@@ -61,7 +62,7 @@ def send_telegram_message(message):
 # Function to send periodic performance report
 def send_performance_report(frequency):
     uptime = datetime.now() - start_time
-    roi = (total_profit / initial_balance) * 100
+    roi = (total_profit / initial_balance) * 100 if initial_balance != 0 else Decimal('0')
     report = (
         f"Performance Report:\n"
         f"Report Frequency: {frequency // 3600} hours\n"
@@ -144,16 +145,23 @@ def place_grid_orders(current_price, trading_pair, balance):
 
 # Function to execute a limit order
 def execute_order(order):
+    global successful_trades, failed_trades, total_profit, open_positions
     try:
         if order['type'] == 'buy':
             response = exchange.create_limit_buy_order(order['symbol'], order['size'], order['price'])
-        else:
+            # Store the open position with the purchase price
+            open_positions[order['symbol']] = order['price']
+        elif order['type'] == 'sell':
+            if order['symbol'] in open_positions:
+                buy_price = open_positions.pop(order['symbol'])
+                profit = (order['price'] - buy_price) * order['size']
+                total_profit += profit
             response = exchange.create_limit_sell_order(order['symbol'], order['size'], order['price'])
+        successful_trades += 1
         logger.info(f"{order['type'].capitalize()} order placed: {order}")
-        # send_telegram_message(f"{order['type'].capitalize()} order placed: {order}")
     except Exception as e:
+        failed_trades += 1
         logger.error(f"Failed to place {order['type']} order: {order}, Error: {e}")
-        # send_telegram_message(f"Failed to place {order['type']} order: {order}, Error: {e}")
 
 # Function to check stop-loss or take-profit
 def check_stop_take_profit(current_price, trading_pair, balance):
