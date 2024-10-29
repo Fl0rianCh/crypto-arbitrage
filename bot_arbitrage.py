@@ -70,7 +70,8 @@ def send_performance_report(frequency):
         f"Successful Trades: {successful_trades}\n"
         f"Failed Trades: {failed_trades}\n"
         f"Total Profit: {total_profit:.2f} USDC\n"
-        f"ROI: {roi:.2f}%"
+        f"ROI: {roi:.2f}%\n"
+        f"Current Account Balance: {exchange.fetch_free_balance().get('USDC', 0):.2f} USDC"
     )
     send_telegram_message(report)
 
@@ -79,14 +80,16 @@ def has_sufficient_balance(order):
     balance = exchange.fetch_free_balance()
     symbol = order['symbol'].split('/')[0]  # Example: BTC
     required_balance = order['price'] * order['size'] * (1 + FEE_PERCENT / 100)
+
     if order['type'] == 'buy':
-        if balance['USDC'] < required_balance:
+        if balance.get('USDC', 0) < required_balance:
             logger.error(f"Insufficient USDC balance for order: {order}")
             return False
     else:
-        if balance[symbol] < order['size']:
+        if balance.get(symbol, 0) < order['size']:
             logger.error(f"Insufficient {symbol} balance for order: {order}")
             return False
+
     return True
 
 # Function to place limit orders at grid levels and execute them
@@ -101,7 +104,6 @@ def place_grid_orders(current_price, trading_pair, balance):
     # Ensure base order size meets the minimum requirement
     if base_order_size < min_order_size:
         logger.error(f"Base order size {base_order_size} is below the minimum required {min_order_size} for {trading_pair}. Adjusting grid levels or balance may be needed.")
-        # send_telegram_message(f"Base order size {base_order_size} is below the minimum required {min_order_size} for {trading_pair}. Adjusting grid levels or balance may be needed.")
         return []
 
     # Adjust the base order size to meet the minimum requirement if necessary
@@ -111,7 +113,6 @@ def place_grid_orders(current_price, trading_pair, balance):
     # If the total required balance exceeds the available balance, reduce the number of grid levels
     if total_required_balance > balance:
         logger.warning(f"Total required balance {total_required_balance} exceeds available balance {balance}. Reducing grid levels.")
-        # send_telegram_message(f"Total required balance {total_required_balance} exceeds available balance {balance}. Reducing grid levels.")
         max_levels = int(balance / (adjusted_order_size * current_price))
         if max_levels < 1:
             logger.error(f"Insufficient balance to place even a single order for {trading_pair}.")
@@ -139,7 +140,6 @@ def place_grid_orders(current_price, trading_pair, balance):
             execute_order(order)
         else:
             logger.error(f"Cannot place order due to insufficient balance: {order}")
-            # send_telegram_message(f"Cannot place order due to insufficient balance: {order}")
 
     return grid_orders
 
@@ -149,16 +149,38 @@ def execute_order(order):
     try:
         if order['type'] == 'buy':
             response = exchange.create_limit_buy_order(order['symbol'], order['size'], order['price'])
-            # Store the open position with the purchase price
-            open_positions[order['symbol']] = order['price']
+            # Attendre la confirmation de l'ordre avant de mettre à jour la position
+            time.sleep(5)
+            response = exchange.fetch_order(response['id'], order['symbol'])  # Récupérer l'état de l'ordre
+            if response['status'] == 'closed':
+                open_positions[order['symbol']] = order['price']
+                successful_trades += 1
+            else:
+                logger.error(f"Buy order not completed: {order}")
+                failed_trades += 1
+
         elif order['type'] == 'sell':
             if order['symbol'] in open_positions:
                 buy_price = open_positions.pop(order['symbol'])
-                profit = (order['price'] - buy_price) * order['size']
-                total_profit += profit
-            response = exchange.create_limit_sell_order(order['symbol'], order['size'], order['price'])
-        successful_trades += 1
+                response = exchange.create_limit_sell_order(order['symbol'], order['size'], order['price'])
+                # Attendre la confirmation de l'ordre
+                time.sleep(5)
+                response = exchange.fetch_order(response['id'], order['symbol'])  # Récupérer l'état de l'ordre
+                if response['status'] == 'closed':
+                    profit = (order['price'] - buy_price) * order['size']
+                    # Soustraire les frais du profit
+                    profit -= profit * (FEE_PERCENT / 100)
+                    total_profit += profit
+                    successful_trades += 1
+                else:
+                    logger.error(f"Sell order not completed: {order}")
+                    failed_trades += 1
+            else:
+                logger.error(f"No matching buy position for sell order: {order}")
+                failed_trades += 1
+
         logger.info(f"{order['type'].capitalize()} order placed: {order}")
+
     except Exception as e:
         failed_trades += 1
         logger.error(f"Failed to place {order['type']} order: {order}, Error: {e}")
@@ -187,6 +209,7 @@ def check_stop_take_profit(current_price, trading_pair, balance):
 
 # Function to close all open positions
 def close_all_positions(trading_pair):
+    global open_positions
     try:
         open_orders = exchange.fetch_open_orders(trading_pair)
         if not open_orders:
@@ -195,11 +218,13 @@ def close_all_positions(trading_pair):
 
         for order in open_orders:
             exchange.cancel_order(order['id'], trading_pair)
+            # Si c'est un ordre d'achat, le retirer des positions ouvertes
+            if order['side'] == 'buy' and trading_pair in open_positions:
+                open_positions.pop(trading_pair)
+
         logger.info(f"All positions closed for {trading_pair}.")
-        # send_telegram_message(f"All positions closed for {trading_pair}.")
     except Exception as e:
         logger.error(f"Failed to close all positions for {trading_pair}: {e}")
-        # send_telegram_message(f"Failed to close all positions for {trading_pair}: {e}")
 
 # Main trading loop
 def main():
