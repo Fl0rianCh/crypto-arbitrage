@@ -30,6 +30,7 @@ class TradingBot:
         self.chat_id = chat_id
         self.bm = BinanceSocketManager(self.client)
         self.socket = None  # Pour la connexion websocket
+        self.symbols = []  # Initialiser self.symbols
 
         # Paramètres de trading
         self.short_window = 12
