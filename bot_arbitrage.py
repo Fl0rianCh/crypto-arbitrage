@@ -113,8 +113,10 @@ class TradingBot:
             if symbol in self.symbols:
                 self.react_to_price_update(symbol, price)
 
-        self.socket = self.bm.symbol_ticker_socket(symbols, process_message)
-        self.bm.start()
+        # Démarrer un WebSocket pour chaque symbole individuellement
+        for symbol in symbols:
+            self.socket = self.bm.symbol_ticker_socket(symbol, process_message)
+            self.bm.start()
 
     def react_to_price_update(self, symbol, price):
         """Réagit aux changements de prix"""
