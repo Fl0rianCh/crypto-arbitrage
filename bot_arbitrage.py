@@ -105,7 +105,6 @@ class TradingBot:
         except Exception as e:
             logging.error("Erreur lors de la mise en place du trailing stop: %s", e)
 
-    # Utilisation de WebSocket
     def start_websocket(self, symbols):
         """Démarre le WebSocket pour les mises à jour en temps réel"""
         def process_message(msg):
@@ -114,7 +113,7 @@ class TradingBot:
             if symbol in self.symbols:
                 self.react_to_price_update(symbol, price)
 
-        self.socket = self.bm.start_symbol_ticker_socket(symbols, process_message)
+        self.socket = self.bm.symbol_ticker_socket(symbols, process_message)
         self.bm.start()
 
     def react_to_price_update(self, symbol, price):
