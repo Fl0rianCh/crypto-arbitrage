@@ -1,265 +1,230 @@
 import os
-import time
-import ccxt
+import pandas as pd
+import numpy as np
 import logging
-from decimal import Decimal
-from dotenv import load_dotenv
+from binance.client import Client
+from binance.websockets import BinanceSocketManager
 from telegram import Bot
-from datetime import datetime
+from datetime import datetime, timedelta
+import time
+import ta  # Pour les indicateurs techniques
+from dotenv import load_dotenv  # Pour sécuriser les variables
 
-load_dotenv('config.env')
+# Charger les clés API depuis les variables d'environnement
+load_dotenv()
 
-# Configurations
-INVESTMENT = Decimal('400')  # EUR initial investment
-GRID_LEVELS = 5  # Number of grid levels
-GRID_SPACING_PERCENT = Decimal('1.5')  # Grid spacing as a percentage of the price
-STOP_LOSS_PERCENT = Decimal('10')  # Stop-loss at 10% below initial investment
-TAKE_PROFIT_PERCENT = Decimal('20')  # Take-profit at 15% above initial investment
-FEE_PERCENT = Decimal('0.1')  # Fee as 0.1% per trade on Binance
-
-# Load Binance API keys from environment
 BINANCE_API_KEY = os.getenv('BINANCE_API_KEY')
 BINANCE_SECRET_KEY = os.getenv('BINANCE_SECRET_KEY')
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 
-# Logger configuration
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s', filename='arbitrage.log')
-logger = logging.getLogger(__name__)
+# Configuration des logs
+logging.basicConfig(filename='trading_bot.log', level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# Initialize Binance exchange
-exchange = ccxt.binance({
-    'apiKey': BINANCE_API_KEY,
-    'secret': BINANCE_SECRET_KEY,
-    'enableRateLimit': True
-})
+class TradingBot:
+    def __init__(self, api_key, secret_key, telegram_token, chat_id):
+        self.client = Client(api_key, secret_key)
+        self.telegram_bot = Bot(token=telegram_token)
+        self.chat_id = chat_id
+        self.bm = BinanceSocketManager(self.client)
+        self.socket = None  # Pour la connexion websocket
 
-# Choose the trading pairs to operate on
-TRADING_PAIRS = ['BTC/USDC']  # Suitable high liquidity trading pairs
+        # Paramètres de trading
+        self.short_window = 12
+        self.long_window = 26
+        self.trailing_stop_percent = 0.02  # 2% au lieu de 1.5%
+        self.position_size_percent = 0.10  # 10% du capital par trade
+        self.daily_loss_limit = 0.15  # 15% du capital
+        self.max_positions = 1  # Une seule position à la fois
+        self.trades = []
 
-# Calculate the investment in USDC
-initial_balance = INVESTMENT  # Assuming EUR to USDC conversion is handled externally
+    def check_balance(self):
+    balance = float(self.client.get_asset_balance(asset='USDC')['free'])
+    if balance < 300:  # Alerte si le solde descend en dessous de 300 USDC
+        self.send_telegram_notification("Alerte : Le solde est descendu en dessous de 300 USDC")
 
-pair_balance = initial_balance / len(TRADING_PAIRS)
+    # Gestion avancée du portefeuille
+    def diversify_portfolio(self, symbols):
+        self.symbols = symbols
 
-# Initialize Telegram Bot
-bot = Bot(token=TELEGRAM_TOKEN)
+    def adjust_position_size(self, volatility):
+        """Ajuste la taille de la position en fonction de la volatilité"""
+        self.position_size_percent = max(0.01, min(0.05, volatility))
 
-# Performance metrics
-successful_trades = 0
-failed_trades = 0
-total_profit = Decimal('0')
-start_time = datetime.now()
-open_positions = {}  # Store open positions with their prices
-
-# Function to send Telegram notifications
-def send_telegram_message(message):
-    try:
-        bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
-    except Exception as e:
-        logger.error(f"Failed to send Telegram message: {e}")
-
-# Function to send periodic performance report
-def send_performance_report(frequency):
-    uptime = datetime.now() - start_time
-    roi = (total_profit / initial_balance) * 100 if initial_balance != 0 else Decimal('0')
-    report = (
-        f"Performance Report:\n"
-        f"Report Frequency: {frequency // 3600} hours\n"
-        f"Uptime: {uptime}\n"
-        f"Successful Trades: {successful_trades}\n"
-        f"Failed Trades: {failed_trades}\n"
-        f"Total Profit: {total_profit:.2f} USDC\n"
-        f"ROI: {roi:.2f}%\n"
-        f"Current Account Balance: {exchange.fetch_free_balance().get('USDC', 0):.2f} USDC"
-    )
-    send_telegram_message(report)
-
-# Function to check if there is sufficient balance for an order
-def has_sufficient_balance(order):
-    balance = exchange.fetch_free_balance()
-    symbol = order['symbol'].split('/')[0]  # Example: BTC
-    required_balance = order['price'] * order['size'] * (1 + FEE_PERCENT / 100)
-
-    if order['type'] == 'buy':
-        if balance.get('USDC', 0) < required_balance:
-            logger.error(f"Insufficient USDC balance for order: {order}")
-            return False
-    else:
-        if balance.get(symbol, 0) < order['size']:
-            logger.error(f"Insufficient {symbol} balance for order: {order}")
-            return False
-
-    return True
-
-# Function to place limit orders at grid levels and execute them
-def place_grid_orders(current_price, trading_pair, balance):
-    grid_orders = []
-    market = exchange.market(trading_pair)
-    min_order_size = market['limits']['amount']['min']
-
-    # Calculate the maximum possible order size per grid level
-    base_order_size = balance / GRID_LEVELS / current_price
-
-    # Ensure base order size meets the minimum requirement
-    if base_order_size < min_order_size:
-        logger.error(f"Base order size {base_order_size} is below the minimum required {min_order_size} for {trading_pair}. Adjusting grid levels or balance may be needed.")
-        return []
-
-    # Adjust the base order size to meet the minimum requirement if necessary
-    adjusted_order_size = max(base_order_size, min_order_size)
-    total_required_balance = adjusted_order_size * GRID_LEVELS * current_price
-
-    # If the total required balance exceeds the available balance, reduce the number of grid levels
-    if total_required_balance > balance:
-        logger.warning(f"Total required balance {total_required_balance} exceeds available balance {balance}. Reducing grid levels.")
-        max_levels = int(balance / (adjusted_order_size * current_price))
-        if max_levels < 1:
-            logger.error(f"Insufficient balance to place even a single order for {trading_pair}.")
-            send_telegram_message(f"Insufficient balance to place even a single order for {trading_pair}.")
-            return []
-        adjusted_grid_levels = min(GRID_LEVELS, max_levels)
-    else:
-        adjusted_grid_levels = GRID_LEVELS
-
-    # Place grid orders
-    for i in range(adjusted_grid_levels):
-        price = current_price * (1 + GRID_SPACING_PERCENT / 100) ** (i - adjusted_grid_levels // 2)
-        order_type = 'buy' if price < current_price else 'sell'
-
-        order = {
-            'symbol': trading_pair,
-            'price': round(price, 2),
-            'size': round(adjusted_order_size, 6),
-            'type': order_type
-        }
-
-        if has_sufficient_balance(order):
-            grid_orders.append(order)
-            # Execute the order immediately
-            execute_order(order)
+    # Optimisation dynamique des paramètres
+    def optimize_parameters(self, performance_data):
+        if performance_data.mean() > 0:
+            self.short_window = max(self.short_window - 1, 8)
+            self.long_window = max(self.long_window - 1, 20)
+            self.trailing_stop_percent = max(self.trailing_stop_percent - 0.002, 0.015)
         else:
-            logger.error(f"Cannot place order due to insufficient balance: {order}")
+            self.short_window = min(self.short_window + 1, 15)
+            self.long_window = min(self.long_window + 1, 30)
+            self.trailing_stop_percent = min(self.trailing_stop_percent + 0.002, 0.03)
 
-    return grid_orders
+    def calculate_indicators(self, data):
+        """Calcul des moyennes mobiles et autres indicateurs."""
+        data['short_ma'] = data['close'].rolling(window=self.short_window).mean()
+        data['long_ma'] = data['close'].rolling(window=self.long_window).mean()
+        data['rsi'] = ta.momentum.RSIIndicator(data['close']).rsi()
+        return data
 
-# Function to execute a limit order
-def execute_order(order):
-    global successful_trades, failed_trades, total_profit, open_positions
-    try:
-        if order['type'] == 'buy':
-            response = exchange.create_limit_buy_order(order['symbol'], order['size'], order['price'])
-            # Attendre la confirmation de l'ordre avant de mettre à jour la position
-            time.sleep(5)
-            response = exchange.fetch_order(response['id'], order['symbol'])  # Récupérer l'état de l'ordre
-            if response['status'] == 'closed':
-                open_positions[order['symbol']] = order['price']
-                successful_trades += 1
-            else:
-                logger.error(f"Buy order not completed: {order}")
-                failed_trades += 1
+    def check_signals(self, data):
+    if data['short_ma'].iloc[-2] < data['long_ma'].iloc[-2] and data['short_ma'].iloc[-1] > data['long_ma'].iloc[-1]:
+        if data['rsi'].iloc[-1] < 75:  # Augmenté de 70 à 75
+            return "BUY"
+    elif data['short_ma'].iloc[-2] > data['long_ma'].iloc[-2] and data['short_ma'].iloc[-1] < data['long_ma'].iloc[-1]:
+        if data['rsi'].iloc[-1] > 25:  # Diminué de 30 à 25
+            return "SELL"
+    return None
 
-        elif order['type'] == 'sell':
-            if order['symbol'] in open_positions:
-                buy_price = open_positions.pop(order['symbol'])
-                response = exchange.create_limit_sell_order(order['symbol'], order['size'], order['price'])
-                # Attendre la confirmation de l'ordre
-                time.sleep(5)
-                response = exchange.fetch_order(response['id'], order['symbol'])  # Récupérer l'état de l'ordre
-                if response['status'] == 'closed':
-                    profit = (order['price'] - buy_price) * order['size']
-                    # Soustraire les frais du profit
-                    profit -= profit * (FEE_PERCENT / 100)
-                    total_profit += profit
-                    successful_trades += 1
-                else:
-                    logger.error(f"Sell order not completed: {order}")
-                    failed_trades += 1
-            else:
-                logger.error(f"No matching buy position for sell order: {order}")
-                failed_trades += 1
-
-        logger.info(f"{order['type'].capitalize()} order placed: {order}")
-
-    except Exception as e:
-        failed_trades += 1
-        logger.error(f"Failed to place {order['type']} order: {order}, Error: {e}")
-
-# Function to check stop-loss or take-profit
-def check_stop_take_profit(current_price, trading_pair, balance):
-    open_orders = exchange.fetch_open_orders(trading_pair)
-    if not open_orders:
-        logger.info(f"No open positions for {trading_pair}. Skipping stop-loss and take-profit check.")
-        return False
-
-    profit_target = balance * (1 + TAKE_PROFIT_PERCENT / 100)
-    loss_limit = balance * (1 - STOP_LOSS_PERCENT / 100)
-
-    if current_price >= profit_target:
-        logger.info(f"Take-profit reached for {trading_pair}. Closing all positions.")
-        # send_telegram_message(f"Take-profit reached at price {current_price} for {trading_pair}. Closing all positions.")
-        close_all_positions(trading_pair)
-        return True
-    elif current_price <= loss_limit:
-        logger.info(f"Stop-loss triggered for {trading_pair}. Closing all positions.")
-        # send_telegram_message(f"Stop-loss triggered at price {current_price} for {trading_pair}. Closing all positions.")
-        close_all_positions(trading_pair)
-        return True
-    return False
-
-# Function to close all open positions
-def close_all_positions(trading_pair):
-    global open_positions
-    try:
-        open_orders = exchange.fetch_open_orders(trading_pair)
-        if not open_orders:
-            logger.info(f"No open positions to close for {trading_pair}.")
-            return
-
-        for order in open_orders:
-            exchange.cancel_order(order['id'], trading_pair)
-            # Si c'est un ordre d'achat, le retirer des positions ouvertes
-            if order['side'] == 'buy' and trading_pair in open_positions:
-                open_positions.pop(trading_pair)
-
-        logger.info(f"All positions closed for {trading_pair}.")
-    except Exception as e:
-        logger.error(f"Failed to close all positions for {trading_pair}: {e}")
-
-# Main trading loop
-def main():
-    report_interval = int(os.getenv('REPORT_INTERVAL', 60 * 60 * 1))  # 24 hours
-    last_report_time = time.time()
-
-    while True:
+    def execute_trade(self, symbol, action, balance):
+        """Exécution d'un trade"""
+        quantity = self.adjust_position_size(balance)
         try:
-            for trading_pair in TRADING_PAIRS:
-                ticker = exchange.fetch_ticker(trading_pair)
-                current_price = Decimal(ticker['last'])
-
-                # Check for stop-loss or take-profit condition
-                if check_stop_take_profit(current_price, trading_pair, pair_balance):
-                    continue
-
-                # Place grid orders
-                orders = place_grid_orders(current_price, trading_pair, pair_balance)
-                if not orders:
-                    logger.error(f"No grid orders placed for {trading_pair} due to insufficient balance or other issues.")
-                    send_telegram_message(f"No grid orders placed for {trading_pair}. Please review settings.")
-                    continue
-            
-            # Send performance report periodically
-            current_time = time.time()
-            if current_time - last_report_time >= report_interval:
-                send_performance_report(report_interval)
-                last_report_time = current_time
-                
-            # Sleep for a while before rechecking the market
-            time.sleep(60)
+            if action == "BUY":
+                order = self.client.order_market_buy(symbol=symbol, quantity=quantity)
+                self.set_trailing_stop(symbol, quantity, "BUY")
+            elif action == "SELL":
+                order = self.client.order_market_sell(symbol=symbol, quantity=quantity)
+                self.set_trailing_stop(symbol, quantity, "SELL")
+            self.trades.append(order)
+            self.send_telegram_notification(f"{action} exécuté pour {symbol}. Détails: {order}")
+            logging.info("%s exécuté pour %s. Détails: %s", action, symbol, order)
         except Exception as e:
-            logger.error(f"Error in main trading loop: {e}")
-            send_telegram_message(f"Error in main trading loop: {e}")
-            time.sleep(60)
+            logging.error("Erreur d'exécution du trade %s pour %s: %s", action, symbol, e)
 
-if __name__ == "__main__":
-    main()
+    def set_trailing_stop(self, symbol, quantity, action):
+        """Définit un trailing stop pour maximiser les profits."""
+        try:
+            price = float(self.client.get_symbol_ticker(symbol=symbol)['price'])
+            stop_price = price * (1 - self.trailing_stop_percent if action == "BUY" else 1 + self.trailing_stop_percent)
+        except Exception as e:
+            logging.error("Erreur lors de la mise en place du trailing stop: %s", e)
+
+    # Utilisation de WebSocket
+    def start_websocket(self, symbols):
+        """Démarre le WebSocket pour les mises à jour en temps réel"""
+        def process_message(msg):
+            symbol = msg['s']
+            price = float(msg['p'])
+            if symbol in self.symbols:
+                self.react_to_price_update(symbol, price)
+
+        self.socket = self.bm.start_symbol_ticker_socket(symbols, process_message)
+        self.bm.start()
+
+    def react_to_price_update(self, symbol, price):
+        """Réagit aux changements de prix"""
+        data = self.get_historical_data(symbol)
+        if data is not None:
+            data = self.calculate_indicators(data)
+            signal = self.check_signals(data)
+
+            balance = float(self.client.get_asset_balance(asset='USDC')['free'])
+            if signal == "BUY" and len(self.trades) < self.max_positions:
+                self.execute_trade(symbol, "BUY", balance)
+            elif signal == "SELL":
+                self.execute_trade(symbol, "SELL", balance)
+
+    def backtest(self, symbol, initial_balance=450):
+        """Simule les conditions de marché réelles dans le backtest"""
+        data = self.get_historical_data(symbol, interval='1h', lookback='1000')
+        if data is not None:
+            balance = initial_balance
+            performance = []
+            for i in range(self.long_window, len(data)):
+                subset = data.iloc[:i+1]
+                signal = self.check_signals(subset)
+                if signal:
+                    trade_balance = balance * self.position_size_percent
+                    if signal == "BUY":
+                        balance += trade_balance
+                    elif signal == "SELL":
+                        balance -= trade_balance
+                    performance.append(balance)
+            logging.info("Backtest complété avec un capital final de %s", balance)
+            
+    def run(self):
+        """Exécution principale du bot"""
+        self.start_websocket(self.symbols)  # Lancement du websocket pour les mises à jour en temps réel
+
+        while True:
+            try:
+                # Optimisation périodique des paramètres en fonction des performances récentes
+                performance_data = [trade['profit'] for trade in self.trades if 'profit' in trade]
+                if len(performance_data) >= 10:  # Optimisation tous les 10 trades
+                    self.optimize_parameters(performance_data)
+
+                # Diversification du portefeuille et allocation
+                balance = float(self.client.get_asset_balance(asset='USDC')['free'])
+                self.diversify_portfolio(['BTCUSDC', 'ETHUSDC'])  # Exemples de paires diversifiées
+
+                # Journalisation et rapports quotidiens
+                current_time = datetime.now()
+                if current_time.hour % 3 == 0:  # Rapport toutes les 4 heures
+                    self.generate_report()
+                    self.save_trade_data()
+
+                time.sleep(60)  # Attente de 60 secondes pour éviter des appels fréquents
+                
+            except Exception as e:
+                logging.error("Erreur dans la boucle principale: %s", e)
+                self.send_telegram_notification("Erreur dans la boucle principale: " + str(e))
+                time.sleep(5)  # Pause de quelques secondes avant de réessayer
+
+    def generate_report(self):
+        """Génère un rapport de performance du bot et l'envoie via Telegram"""
+        try:
+            profits = sum([trade['profit'] for trade in self.trades if 'profit' in trade])
+            sharpe_ratio = self.calculate_sharpe_ratio(self.trades)
+            max_drawdown = self.calculate_max_drawdown(self.trades)
+            success_rate = self.calculate_success_rate(self.trades)
+            report = (f"Performance des dernières 24h:\n"
+                      f"Profits totaux: {profits}\n"
+                      f"Sharpe Ratio: {sharpe_ratio:.2f}\n"
+                      f"Max Drawdown: {max_drawdown:.2f}%\n"
+                      f"Taux de succès: {success_rate:.2f}%")
+            self.send_telegram_notification(report)
+            logging.info(report)
+        except Exception as e:
+            logging.error("Erreur lors de la génération du rapport: %s", e)
+
+    def calculate_sharpe_ratio(self, trades):
+        """Calcule le ratio de Sharpe basé sur les retours des trades"""
+        returns = [trade['profit'] for trade in trades if 'profit' in trade]
+        if len(returns) < 2:
+            return 0
+        return np.mean(returns) / np.std(returns)
+
+    def calculate_max_drawdown(self, trades):
+        """Calcule le drawdown maximum pour évaluer le risque"""
+        balance_history = np.cumsum([trade['profit'] for trade in trades if 'profit' in trade])
+        peak = np.maximum.accumulate(balance_history)
+        drawdown = (balance_history - peak) / peak
+        return np.min(drawdown) * -100  # En pourcentage
+
+    def calculate_success_rate(self, trades):
+        """Calcule le taux de réussite des trades"""
+        successful_trades = sum(1 for trade in trades if trade['profit'] > 0)
+        return (successful_trades / len(trades)) * 100 if trades else 0
+
+    def send_telegram_notification(self, message):
+        """Envoie une notification Telegram pour les événements importants"""
+        try:
+            self.telegram_bot.send_message(chat_id=self.chat_id, text=message)
+        except Exception as e:
+            logging.error("Erreur lors de l'envoi de la notification Telegram: %s", e)
+
+    def save_trade_data(self):
+        """Sauvegarde des données de trading dans un fichier CSV pour le suivi"""
+        try:
+            df = pd.DataFrame(self.trades)
+            df.to_csv("trades.csv", index=False)
+            logging.info("Données de trade sauvegardées avec succès.")
+        except Exception as e:
+            logging.error("Erreur lors de la sauvegarde des données de trade: %s", e)
+
+# Initialisation
+bot = TradingBot(BINANCE_API_KEY, BINANCE_SECRET_KEY, TELEGRAM_TOKEN, TELEGRAM_CHAT_ID)
+bot.run()
