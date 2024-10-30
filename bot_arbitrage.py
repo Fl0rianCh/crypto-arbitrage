@@ -4,6 +4,7 @@ import numpy as np
 import logging
 from binance.client import Client
 from binance.websockets import BinanceSocketManager
+from binance.streams import BinanceSocketManager
 from telegram import Bot
 from datetime import datetime, timedelta
 import time
