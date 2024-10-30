@@ -72,13 +72,13 @@ class TradingBot:
         return data
 
     def check_signals(self, data):
-    if data['short_ma'].iloc[-2] < data['long_ma'].iloc[-2] and data['short_ma'].iloc[-1] > data['long_ma'].iloc[-1]:
-        if data['rsi'].iloc[-1] < 75:  # Augmenté de 70 à 75
-            return "BUY"
-    elif data['short_ma'].iloc[-2] > data['long_ma'].iloc[-2] and data['short_ma'].iloc[-1] < data['long_ma'].iloc[-1]:
-        if data['rsi'].iloc[-1] > 25:  # Diminué de 30 à 25
-            return "SELL"
-    return None
+        if data['short_ma'].iloc[-2] < data['long_ma'].iloc[-2] and data['short_ma'].iloc[-1] > data['long_ma'].iloc[-1]:
+            if data['rsi'].iloc[-1] < 75:  # Augmenté de 70 à 75
+                return "BUY"
+        elif data['short_ma'].iloc[-2] > data['long_ma'].iloc[-2] and data['short_ma'].iloc[-1] < data['long_ma'].iloc[-1]:
+            if data['rsi'].iloc[-1] > 25:  # Diminué de 30 à 25
+                return "SELL"
+        return None
 
     def execute_trade(self, symbol, action, balance):
         """Exécution d'un trade"""
