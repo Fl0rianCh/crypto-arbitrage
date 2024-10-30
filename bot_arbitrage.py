@@ -42,20 +42,25 @@ class TradingBot:
         self.trades = deque(maxlen=1000)  # Utilisation de deque pour les trades
 
     def check_balance(self):
+        logging.info("Vérification du solde")
         balance = float(self.client.get_asset_balance(asset='USDC')['free'])
+        logging.info(f"Solde actuel : {balance} USDC")
         if balance < 300:  # Alerte si le solde descend en dessous de 300 USDC
             self.send_telegram_notification("Alerte : Le solde est descendu en dessous de 300 USDC")
             
     # Gestion avancée du portefeuille
     def diversify_portfolio(self, symbols):
+        logging.info(f"Diversification du portefeuille avec les symboles : {symbols}")
         self.symbols = symbols
 
     def adjust_position_size(self, volatility):
         """Ajuste la taille de la position en fonction de la volatilité"""
+        logging.info(f"Ajustement de la taille de la position en fonction de la volatilité : {volatility}")
         self.position_size_percent = max(0.01, min(0.05, volatility))
 
     # Optimisation dynamique des paramètres
     def optimize_parameters(self, performance_data):
+        logging.info("Optimisation des paramètres de trading")
         if performance_data.mean() > 0:
             self.short_window = max(self.short_window - 1, 8)
             self.long_window = max(self.long_window - 1, 20)
@@ -64,25 +69,31 @@ class TradingBot:
             self.short_window = min(self.short_window + 1, 15)
             self.long_window = min(self.long_window + 1, 30)
             self.trailing_stop_percent = min(self.trailing_stop_percent + 0.002, 0.03)
+        logging.info(f"Paramètres optimisés : short_window={self.short_window}, long_window={self.long_window}, trailing_stop_percent={self.trailing_stop_percent}")
 
     def calculate_indicators(self, data):
         """Calcul des moyennes mobiles et autres indicateurs."""
+        logging.info("Calcul des indicateurs techniques")
         data['short_ma'] = data['close'].rolling(window=self.short_window).mean()
         data['long_ma'] = data['close'].rolling(window=self.long_window).mean()
         data['rsi'] = ta.momentum.RSIIndicator(data['close']).rsi()
         return data
 
     def check_signals(self, data):
+        logging.info("Vérification des signaux de trading")
         if data['short_ma'].iloc[-2] < data['long_ma'].iloc[-2] and data['short_ma'].iloc[-1] > data['long_ma'].iloc[-1]:
             if data['rsi'].iloc[-1] < 75:  # Augmenté de 70 à 75
+                logging.info("Signal d'achat détecté")
                 return "BUY"
         elif data['short_ma'].iloc[-2] > data['long_ma'].iloc[-2] and data['short_ma'].iloc[-1] < data['long_ma'].iloc[-1]:
             if data['rsi'].iloc[-1] > 25:  # Diminué de 30 à 25
+                logging.info("Signal de vente détecté")
                 return "SELL"
         return None
 
     def execute_trade(self, symbol, action, balance):
         """Exécution d'un trade"""
+        logging.info(f"Exécution du trade : action={action}, symbol={symbol}, balance={balance}")
         quantity = self.adjust_position_size(balance)
         try:
             if action == "BUY":
@@ -99,9 +110,11 @@ class TradingBot:
 
     def set_trailing_stop(self, symbol, quantity, action):
         """Définit un trailing stop pour maximiser les profits."""
+        logging.info(f"Mise en place du trailing stop : action={action}, symbol={symbol}, quantity={quantity}")
         try:
             price = float(self.client.get_symbol_ticker(symbol=symbol)['price'])
             stop_price = price * (1 - self.trailing_stop_percent if action == "BUY" else 1 + self.trailing_stop_percent)
+            logging.info(f"Trailing stop défini à : {stop_price}")
         except Exception as e:
             logging.error("Erreur lors de la mise en place du trailing stop: %s", e)
 
@@ -114,12 +127,15 @@ class TradingBot:
                 self.react_to_price_update(symbol, price)
 
         # Démarrer un WebSocket pour chaque symbole individuellement
+        logging.info("Démarrage du WebSocket pour les symboles :")
         for symbol in symbols:
+            logging.info(f"Connexion WebSocket pour le symbole : {symbol}")
             self.socket = self.bm.symbol_ticker_socket(symbol, process_message)
             self.bm.start()
 
     def react_to_price_update(self, symbol, price):
         """Réagit aux changements de prix"""
+        logging.info(f"Mise à jour des prix reçue : symbol={symbol}, price={price}")
         data = self.get_historical_data(symbol)
         if data is not None:
             data = self.calculate_indicators(data)
@@ -133,6 +149,7 @@ class TradingBot:
 
     def backtest(self, symbol, initial_balance=450):
         """Simule les conditions de marché réelles dans le backtest"""
+        logging.info(f"Démarrage du backtest pour le symbole : {symbol}")
         data = self.get_historical_data(symbol, interval='1h', lookback='1000')
         if data is not None:
             balance = initial_balance
@@ -151,6 +168,8 @@ class TradingBot:
             
     def run(self):
         """Exécution principale du bot"""
+        logging.info("Démarrage du bot de trading")
+        self.send_telegram_notification("Le bot de trading a été lancé.")
         self.start_websocket(self.symbols)  # Lancement du websocket pour les mises à jour en temps réel
 
         while True:
@@ -246,5 +265,6 @@ class TradingBot:
             logging.error("Erreur lors de la sauvegarde des données de trade: %s", e)
 
 # Initialisation
+logging.info("Initialisation du bot de trading")
 bot = TradingBot(BINANCE_API_KEY, BINANCE_SECRET_KEY, TELEGRAM_TOKEN, TELEGRAM_CHAT_ID)
 bot.run()
