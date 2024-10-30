@@ -9,6 +9,8 @@ from datetime import datetime, timedelta
 import time
 import ta  # Pour les indicateurs techniques
 from dotenv import load_dotenv  # Pour sécuriser les variables
+from collections import deque  # Utilisation de deque
+import matplotlib.pyplot as plt  # Pour la visualisation
 
 # Charger les clés API depuis les variables d'environnement
 load_dotenv()
@@ -36,7 +38,7 @@ class TradingBot:
         self.position_size_percent = 0.10  # 10% du capital par trade
         self.daily_loss_limit = 0.15  # 15% du capital
         self.max_positions = 1  # Une seule position à la fois
-        self.trades = []
+        self.trades = deque(maxlen=1000)  # Utilisation de deque pour les trades
 
     def check_balance(self):
     balance = float(self.client.get_asset_balance(asset='USDC')['free'])
@@ -186,9 +188,25 @@ class TradingBot:
                       f"Max Drawdown: {max_drawdown:.2f}%\n"
                       f"Taux de succès: {success_rate:.2f}%")
             self.send_telegram_notification(report)
+            # Générer un graphique de performance
+            self.plot_performance()
             logging.info(report)
         except Exception as e:
             logging.error("Erreur lors de la génération du rapport: %s", e)
+            
+    def plot_performance(self):
+        """Génère un graphique de la performance du bot"""
+        try:
+            profits = [trade['profit'] for trade in self.trades if 'profit' in trade]
+            plt.plot(profits)
+            plt.title('Performance du Bot de Trading')
+            plt.xlabel('Trades')
+            plt.ylabel('Profits')
+            plt.savefig('performance_plot.png')
+            plt.close()
+            self.send_telegram_notification("Graphique de performance généré.")
+        except Exception as e:
+            logging.error("Erreur lors de la génération du graphique de performance: %s", e)
 
     def calculate_sharpe_ratio(self, trades):
         """Calcule le ratio de Sharpe basé sur les retours des trades"""
