@@ -13,7 +13,7 @@ from collections import deque  # Utilisation de deque
 import matplotlib.pyplot as plt  # Pour la visualisation
 
 # Charger les clés API depuis les variables d'environnement
-load_dotenv()
+load_dotenv('config.env')
 
 BINANCE_API_KEY = os.getenv('BINANCE_API_KEY')
 BINANCE_SECRET_KEY = os.getenv('BINANCE_SECRET_KEY')
