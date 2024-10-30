@@ -41,10 +41,10 @@ class TradingBot:
         self.trades = deque(maxlen=1000)  # Utilisation de deque pour les trades
 
     def check_balance(self):
-    balance = float(self.client.get_asset_balance(asset='USDC')['free'])
-    if balance < 300:  # Alerte si le solde descend en dessous de 300 USDC
-        self.send_telegram_notification("Alerte : Le solde est descendu en dessous de 300 USDC")
-
+        balance = float(self.client.get_asset_balance(asset='USDC')['free'])
+        if balance < 300:  # Alerte si le solde descend en dessous de 300 USDC
+            self.send_telegram_notification("Alerte : Le solde est descendu en dessous de 300 USDC")
+            
     # Gestion avancée du portefeuille
     def diversify_portfolio(self, symbols):
         self.symbols = symbols
