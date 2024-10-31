@@ -2,6 +2,7 @@ import os
 import pandas as pd
 import numpy as np
 import logging
+import asyncio
 from binance.client import Client
 from binance.streams import BinanceSocketManager
 from telegram import Bot
@@ -118,20 +119,21 @@ class TradingBot:
         except Exception as e:
             logging.error("Erreur lors de la mise en place du trailing stop: %s", e)
 
-    def start_websocket(self, symbols):
+    async def start_websocket(self, symbols):
         """Démarre le WebSocket pour les mises à jour en temps réel"""
-        def process_message(msg):
+        async def process_message(msg):
             symbol = msg['s']
             price = float(msg['p'])
             if symbol in self.symbols:
                 self.react_to_price_update(symbol, price)
 
-        # Démarrer un WebSocket pour chaque symbole individuellement
+        # Démarre un WebSocket pour chaque symbole individuellement
         logging.info("Démarrage du WebSocket pour les symboles :")
         for symbol in symbols:
             logging.info(f"Connexion WebSocket pour le symbole : {symbol}")
-            self.socket = self.bm.symbol_ticker_socket(symbol)
-            self.bm.start()  # Utilisez start pour démarrer le WebSocket
+            self.socket = await self.bm.start_symbol_ticker_socket(symbol, process_message)
+
+        # La méthode start est asynchrone, et on n'a pas besoin d'utiliser start() explicitement
         
     def react_to_price_update(self, symbol, price):
         """Réagit aux changements de prix"""
@@ -166,7 +168,7 @@ class TradingBot:
                     performance.append(balance)
             logging.info("Backtest complété avec un capital final de %s", balance)
             
-    def run(self):
+    async def run(self):
         """Exécution principale du bot"""
         logging.info("Démarrage du bot de trading")
         self.send_telegram_notification("Le bot de trading a été lancé.")
@@ -175,7 +177,7 @@ class TradingBot:
         self.diversify_portfolio(['BTCUSDC', 'ETHUSDC'])  # Exemples de paires diversifiées
         
         # Lancement du websocket pour les mises à jour en temps réel
-        self.start_websocket(self.symbols)
+        await self.start_websocket(self.symbols)
 
         while True:
             try:
@@ -190,12 +192,12 @@ class TradingBot:
                     self.generate_report()
                     self.save_trade_data()
 
-                time.sleep(60)  # Attente de 60 secondes pour éviter des appels fréquents
+                await asyncio.sleep(60)  # Attente de 60 secondes pour éviter des appels fréquents
 
             except Exception as e:
                 logging.error("Erreur dans la boucle principale: %s", e)
                 self.send_telegram_notification("Erreur dans la boucle principale: " + str(e))
-                time.sleep(5)  # Pause de quelques secondes avant de réessayer
+                await asyncio.sleep(5)  # Pause de quelques secondes avant de réessayer
 
     def generate_report(self):
         """Génère un rapport de performance du bot et l'envoie via Telegram"""
@@ -268,4 +270,7 @@ class TradingBot:
 # Initialisation
 logging.info("Initialisation du bot de trading")
 bot = TradingBot(BINANCE_API_KEY, BINANCE_SECRET_KEY, TELEGRAM_TOKEN, TELEGRAM_CHAT_ID)
-bot.run()
+if __name__ == "__main__":
+    logging.info("Initialisation du bot de trading")
+    bot = TradingBot(BINANCE_API_KEY, BINANCE_SECRET_KEY, TELEGRAM_TOKEN, TELEGRAM_CHAT_ID)
+    asyncio.run(bot.run())
