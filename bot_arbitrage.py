@@ -3,6 +3,8 @@ import pandas as pd
 import numpy as np
 import logging
 import asyncio
+import websockets
+import json
 from binance.client import Client
 from binance.streams import BinanceSocketManager
 from telegram import Bot
@@ -127,17 +129,28 @@ class TradingBot:
             if symbol in self.symbols:
                 await self.react_to_price_update(symbol, price)
 
-        # Démarre un WebSocket pour chaque symbole individuellement avec start_socket
         logging.info("Démarrage du WebSocket pour les symboles :")
+
+        # Créer une tâche pour chaque symbole à écouter
+        tasks = []
         for symbol in symbols:
             stream_name = f"{symbol.lower()}@ticker"
-            logging.info(f"Connexion WebSocket pour le symbole : {symbol}")
+            ws_url = f"wss://stream.binance.com:9443/ws/{stream_name}"
             
-            # Utilisation de start_socket pour écouter le stream du ticker pour chaque symbole
-            self.socket = self.bm.start_socket(callback=process_message, stream_name=stream_name)
+            async def websocket_stream():
+                async with websockets.connect(ws_url) as ws:
+                    while True:
+                        try:
+                            msg = await ws.recv()
+                            msg = json.loads(msg)
+                            await process_message(msg)
+                        except Exception as e:
+                            logging.error(f"Erreur dans le WebSocket pour {symbol}: {e}")
+                            break
 
-        # Démarre la gestion des WebSockets asynchrones
-        await self.bm.start()
+            tasks.append(asyncio.create_task(websocket_stream()))
+
+        await asyncio.gather(*tasks)
         
     def react_to_price_update(self, symbol, price):
         """Réagit aux changements de prix"""
