@@ -126,12 +126,12 @@ class TradingBot:
             if symbol in self.symbols:
                 self.react_to_price_update(symbol, price)
 
-        # Démarrer un WebSocket pour chaque symbole individuellement
+        # Démarrer un WebSocket pour chaque symbole individuellement en utilisant start_socket
         logging.info("Démarrage du WebSocket pour les symboles :")
         for symbol in symbols:
             logging.info(f"Connexion WebSocket pour le symbole : {symbol}")
-            self.socket = self.bm.start_symbol_ticker_socket(symbol, process_message)
-        
+            self.socket = self.bm.start_socket(callback=process_message, stream_name=f"{symbol.lower()}@ticker")
+
         # Démarre la gestion du WebSocket
         self.bm.start()
 
