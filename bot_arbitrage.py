@@ -32,17 +32,17 @@ class TradingBot:
         self.telegram_bot = Bot(token=telegram_token)
         self.chat_id = chat_id
         self.bm = BinanceSocketManager(self.client)
-        self.socket = None  # Pour la connexion websocket
         self.symbols = []  # Initialiser self.symbols
+        self.trades = deque(maxlen=1000)
+        self.price_cache = {}
 
         # Paramètres de trading
         self.short_window = 12
         self.long_window = 26
-        self.trailing_stop_percent = 0.02  # 2% au lieu de 1.5%
-        self.position_size_percent = 0.15  # 15% du capital par trade
-        self.daily_loss_limit = 0.15  # 15% du capital
-        self.max_positions = 3  # Nombre de positions
-        self.trades = deque(maxlen=1000)  # Utilisation de deque pour les trades
+        self.trailing_stop_percent = 0.02
+        self.position_size_percent = 0.15
+        self.max_positions = 3
+        self.update_interval = 5  # Intervalle de temps en secondes entre chaque mise à jour
 
     def check_balance(self):
         logging.info("Vérification du solde")
@@ -57,8 +57,7 @@ class TradingBot:
         self.symbols = symbols
 
     def adjust_position_size(self, balance):
-        """Ajuste la taille de la position en fonction de la volatilité"""
-        logging.info(f"Ajustement de la taille de la position en fonction du solde disponible.")
+        """Ajuste la taille de la position en fonction du solde disponible."""
         position_size = balance * self.position_size_percent
         return max(0.01, min(0.05, position_size))
 
@@ -111,17 +110,32 @@ class TradingBot:
             return None
 
     def execute_trade(self, symbol, action, balance):
-        """Exécution d'un trade"""
+        """Exécution d'un trade avec calcul et enregistrement du profit."""
         logging.info(f"Exécution du trade : action={action}, symbol={symbol}, balance={balance}")
         quantity = self.adjust_position_size(balance)
         try:
+            initial_price = float(self.client.get_symbol_ticker(symbol=symbol)['price'])
+            
             if action == "BUY":
                 order = self.client.order_market_buy(symbol=symbol, quantity=quantity)
                 self.set_trailing_stop(symbol, quantity, "BUY")
+                # Enregistrement du trade avec profit provisoire de 0 (calculé lors de la vente)
+                self.trades.append({'symbol': symbol, 'action': action, 'quantity': quantity, 'price': initial_price, 'profit': 0})
+                
             elif action == "SELL":
                 order = self.client.order_market_sell(symbol=symbol, quantity=quantity)
                 self.set_trailing_stop(symbol, quantity, "SELL")
-            self.trades.append(order)
+                
+                # Calcul du profit basé sur le dernier prix d'achat
+                last_trade = next((trade for trade in reversed(self.trades) if trade['symbol'] == symbol and trade['action'] == "BUY"), None)
+                if last_trade:
+                    profit = (initial_price - last_trade['price']) * quantity
+                    last_trade['profit'] = profit
+                    self.trades.append({'symbol': symbol, 'action': action, 'quantity': quantity, 'price': initial_price, 'profit': profit})
+                else:
+                    # Ajouter un trade sans profit si aucun BUY précédent n'est trouvé
+                    self.trades.append({'symbol': symbol, 'action': action, 'quantity': quantity, 'price': initial_price, 'profit': 0})
+
             self.send_telegram_notification(f"{action} exécuté pour {symbol}. Détails: {order}")
             logging.info("%s exécuté pour %s. Détails: %s", action, symbol, order)
         except Exception as e:
@@ -138,53 +152,44 @@ class TradingBot:
             logging.error("Erreur lors de la mise en place du trailing stop: %s", e)
 
     async def start_websocket(self, symbols):
-        """Démarre le WebSocket pour les mises à jour en temps réel"""
+        """Démarre le WebSocket pour les mises à jour en temps réel avec contrôle de fréquence et de variation"""
         async def process_message(msg):
             symbol = msg['s']
             price = float(msg['p'])
-            if symbol in self.symbols:
-                self.react_to_price_update(symbol, price)  # Supprimez await si react_to_price_update n’est pas asynchrone
+            if symbol in self.symbols and price > 0:
+                # Contrôle de variation significative du prix
+                last_price = self.price_cache.get(symbol, None)
+                if last_price is None or abs(price - last_price) / last_price >= 0.001:
+                    self.price_cache[symbol] = price
+                    self.react_to_price_update(symbol, price)
 
-        logging.info("Démarrage du WebSocket pour les symboles :")
-
-        # Créer une tâche pour chaque symbole à écouter
+        # Création des tâches WebSocket pour chaque symbole
         tasks = []
         for symbol in symbols:
-            stream_name = f"{symbol.lower()}@ticker"
-            ws_url = f"wss://stream.binance.com:9443/ws/{stream_name}"
-            
+            ws_url = f"wss://stream.binance.com:9443/ws/{symbol.lower()}@ticker"
             async def websocket_stream(ws_url):
                 while True:
                     try:
                         async with websockets.connect(ws_url) as ws:
                             while True:
-                                try:
-                                    msg = await ws.recv()
-                                    msg = json.loads(msg)
-                                    if msg is not None:  # Assurez-vous que le message n'est pas None
-                                        await process_message(msg)  # Assurez-vous que process_message est async si await est utilisé
-                                except websockets.ConnectionClosed:
-                                    logging.warning(f"Reconnexion WebSocket pour {symbol} en raison d'une déconnexion.")
-                                    break
-                                except TypeError as e:
-                                    logging.error(f"TypeError dans WebSocket pour {symbol}: {e}")
-                                    break  # Ajoutez une sortie ou une gestion spécifique pour TypeError
+                                msg = await ws.recv()
+                                msg = json.loads(msg)
+                                await process_message(msg)
+                    except websockets.ConnectionClosed:
+                        logging.warning(f"Reconnexion WebSocket pour {symbol} en raison d'une déconnexion.")
                     except Exception as e:
                         logging.error(f"Erreur de connexion WebSocket pour {symbol}: {e}")
-                        await asyncio.sleep(5)  # Attendre avant de réessayer
-
+                    await asyncio.sleep(5)
             tasks.append(asyncio.create_task(websocket_stream(ws_url)))
-
         await asyncio.gather(*tasks)
         
     def react_to_price_update(self, symbol, price):
-        """Réagit aux changements de prix"""
+        """Réagit aux changements de prix avec vérification d'intervalle et filtrage des variations non significatives"""
         logging.info(f"Mise à jour des prix reçue : symbol={symbol}, price={price}")
         data = self.get_historical_data(symbol)
         if data is not None:
             data = self.calculate_indicators(data)
             signal = self.check_signals(data)
-
             balance = float(self.client.get_asset_balance(asset='USDC')['free'])
             if signal == "BUY" and len(self.trades) < self.max_positions:
                 self.execute_trade(symbol, "BUY", balance)
