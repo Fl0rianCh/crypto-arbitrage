@@ -170,7 +170,12 @@ class TradingBot:
         """Exécution principale du bot"""
         logging.info("Démarrage du bot de trading")
         self.send_telegram_notification("Le bot de trading a été lancé.")
-        self.start_websocket(self.symbols)  # Lancement du websocket pour les mises à jour en temps réel
+        
+        # Diversification du portefeuille avant le début de la boucle principale
+        self.diversify_portfolio(['BTCUSDC', 'ETHUSDC'])  # Exemples de paires diversifiées
+        
+        # Lancement du websocket pour les mises à jour en temps réel
+        self.start_websocket(self.symbols)
 
         while True:
             try:
@@ -179,18 +184,14 @@ class TradingBot:
                 if len(performance_data) >= 10:  # Optimisation tous les 10 trades
                     self.optimize_parameters(performance_data)
 
-                # Diversification du portefeuille et allocation
-                balance = float(self.client.get_asset_balance(asset='USDC')['free'])
-                self.diversify_portfolio(['BTCUSDC', 'ETHUSDC'])  # Exemples de paires diversifiées
-
                 # Journalisation et rapports quotidiens
                 current_time = datetime.now()
-                if current_time.hour % 3 == 0:  # Rapport toutes les 4 heures
+                if current_time.hour % 3 == 0:  # Rapport toutes les 3 heures
                     self.generate_report()
                     self.save_trade_data()
 
                 time.sleep(60)  # Attente de 60 secondes pour éviter des appels fréquents
-                
+
             except Exception as e:
                 logging.error("Erreur dans la boucle principale: %s", e)
                 self.send_telegram_notification("Erreur dans la boucle principale: " + str(e))
