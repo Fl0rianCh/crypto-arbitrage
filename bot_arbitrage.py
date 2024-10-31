@@ -36,9 +36,9 @@ class TradingBot:
         self.short_window = 12
         self.long_window = 26
         self.trailing_stop_percent = 0.02  # 2% au lieu de 1.5%
-        self.position_size_percent = 0.10  # 10% du capital par trade
+        self.position_size_percent = 0.15  # 15% du capital par trade
         self.daily_loss_limit = 0.15  # 15% du capital
-        self.max_positions = 1  # Une seule position à la fois
+        self.max_positions = 3  # Nombre de positions
         self.trades = deque(maxlen=1000)  # Utilisation de deque pour les trades
 
     def check_balance(self):
