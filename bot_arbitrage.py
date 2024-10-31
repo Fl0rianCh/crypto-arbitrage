@@ -125,15 +125,19 @@ class TradingBot:
             symbol = msg['s']
             price = float(msg['p'])
             if symbol in self.symbols:
-                self.react_to_price_update(symbol, price)
+                await self.react_to_price_update(symbol, price)
 
-        # Démarre un WebSocket pour chaque symbole individuellement
+        # Démarre un WebSocket pour chaque symbole individuellement avec start_socket
         logging.info("Démarrage du WebSocket pour les symboles :")
         for symbol in symbols:
+            stream_name = f"{symbol.lower()}@ticker"
             logging.info(f"Connexion WebSocket pour le symbole : {symbol}")
-            self.socket = await self.bm.start_symbol_ticker_socket(symbol, process_message)
+            
+            # Utilisation de start_socket pour écouter le stream du ticker pour chaque symbole
+            self.socket = self.bm.start_socket(callback=process_message, stream_name=stream_name)
 
-        # La méthode start est asynchrone, et on n'a pas besoin d'utiliser start() explicitement
+        # Démarre la gestion des WebSockets asynchrones
+        await self.bm.start()
         
     def react_to_price_update(self, symbol, price):
         """Réagit aux changements de prix"""
