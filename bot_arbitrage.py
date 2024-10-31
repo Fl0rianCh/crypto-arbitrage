@@ -50,7 +50,7 @@ class TradingBot:
         logging.info(f"Solde actuel : {balance} USDC")
         if balance < 300:  # Alerte si le solde descend en dessous de 300 USDC
             self.send_telegram_notification("Alerte : Le solde est descendu en dessous de 300 USDC")
-            
+
     # Gestion avancée du portefeuille
     def diversify_portfolio(self, symbols):
         logging.info(f"Diversification du portefeuille avec les symboles : {symbols}")
@@ -64,6 +64,8 @@ class TradingBot:
     # Optimisation dynamique des paramètres
     def optimize_parameters(self, performance_data):
         logging.info("Optimisation des paramètres de trading")
+        if len(performance_data) == 0:
+            return  # Assure qu'il y a des données pour l'optimisation
         if performance_data.mean() > 0:
             self.short_window = max(self.short_window - 1, 8)
             self.long_window = max(self.long_window - 1, 20)
@@ -237,6 +239,10 @@ class TradingBot:
     def generate_report(self):
         """Génère un rapport de performance du bot et l'envoie via Telegram"""
         try:
+            if not self.trades:  # Vérifie que trades n'est pas vide
+                logging.info("Aucun trade disponible pour le rapport.")
+                return
+
             profits = sum([trade['profit'] for trade in self.trades if 'profit' in trade])
             sharpe_ratio = self.calculate_sharpe_ratio(self.trades)
             max_drawdown = self.calculate_max_drawdown(self.trades)
