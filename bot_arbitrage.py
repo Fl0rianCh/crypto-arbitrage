@@ -93,6 +93,19 @@ class TradingBot:
                 logging.info("Signal de vente détecté")
                 return "SELL"
         return None
+        
+    def get_historical_data(self, symbol, interval='1h', lookback='50'):
+        """Obtenir les données historiques."""
+        try:
+            klines = self.client.get_klines(symbol=symbol, interval=interval, limit=lookback)
+            df = pd.DataFrame(klines, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume', 
+                                               'close_time', 'quote_asset_volume', 'number_of_trades', 
+                                               'taker_buy_base', 'taker_buy_quote', 'ignore'])
+            df['close'] = df['close'].astype(float)
+            return df[['timestamp', 'close']]
+        except Exception as e:
+            logging.error("Erreur lors de la récupération des données historiques: %s", e)
+            return None
 
     def execute_trade(self, symbol, action, balance):
         """Exécution d'un trade"""
@@ -137,18 +150,23 @@ class TradingBot:
             stream_name = f"{symbol.lower()}@ticker"
             ws_url = f"wss://stream.binance.com:9443/ws/{stream_name}"
             
-            async def websocket_stream():
-                async with websockets.connect(ws_url) as ws:
-                    while True:
-                        try:
-                            msg = await ws.recv()
-                            msg = json.loads(msg)
-                            await process_message(msg)
-                        except Exception as e:
-                            logging.error(f"Erreur dans le WebSocket pour {symbol}: {e}")
-                            break
+            async def websocket_stream(ws_url):
+                while True:
+                    try:
+                        async with websockets.connect(ws_url) as ws:
+                            while True:
+                                try:
+                                    msg = await ws.recv()
+                                    msg = json.loads(msg)
+                                    await process_message(msg)
+                                except websockets.ConnectionClosed:
+                                    logging.warning(f"Reconnexion WebSocket pour {symbol} en raison d'une déconnexion.")
+                                    break
+                    except Exception as e:
+                        logging.error(f"Erreur de connexion WebSocket pour {symbol}: {e}")
+                        await asyncio.sleep(5)  # Attendre avant de réessayer
 
-            tasks.append(asyncio.create_task(websocket_stream()))
+            tasks.append(asyncio.create_task(websocket_stream(ws_url)))
 
         await asyncio.gather(*tasks)
         
@@ -258,6 +276,8 @@ class TradingBot:
 
     def calculate_max_drawdown(self, trades):
         """Calcule le drawdown maximum pour évaluer le risque"""
+        if len(trades) == 0:
+            return 0  # Retourne 0 si aucune donnée n'est disponible
         balance_history = np.cumsum([trade['profit'] for trade in trades if 'profit' in trade])
         peak = np.maximum.accumulate(balance_history)
         drawdown = (balance_history - peak) / peak
