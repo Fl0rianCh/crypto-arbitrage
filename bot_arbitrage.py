@@ -131,8 +131,8 @@ class TradingBot:
         for symbol in symbols:
             logging.info(f"Connexion WebSocket pour le symbole : {symbol}")
             self.socket = self.bm.symbol_ticker_socket(symbol)
-            self.bm.start_socket(self.socket)  # Utilisez start_socket au lieu de start
-
+            self.bm.start()  # Utilisez start pour démarrer le WebSocket
+        
     def react_to_price_update(self, symbol, price):
         """Réagit aux changements de prix"""
         logging.info(f"Mise à jour des prix reçue : symbol={symbol}, price={price}")
