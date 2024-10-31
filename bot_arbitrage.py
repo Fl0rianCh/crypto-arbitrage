@@ -56,10 +56,11 @@ class TradingBot:
         logging.info(f"Diversification du portefeuille avec les symboles : {symbols}")
         self.symbols = symbols
 
-    def adjust_position_size(self, volatility):
+    def adjust_position_size(self, balance):
         """Ajuste la taille de la position en fonction de la volatilité"""
-        logging.info(f"Ajustement de la taille de la position en fonction de la volatilité : {volatility}")
-        self.position_size_percent = max(0.01, min(0.05, volatility))
+        logging.info(f"Ajustement de la taille de la position en fonction du solde disponible.")
+        position_size = balance * self.position_size_percent
+        return max(0.01, min(0.05, position_size))
 
     # Optimisation dynamique des paramètres
     def optimize_parameters(self, performance_data):
@@ -142,7 +143,7 @@ class TradingBot:
             symbol = msg['s']
             price = float(msg['p'])
             if symbol in self.symbols:
-                await self.react_to_price_update(symbol, price)
+                self.react_to_price_update(symbol, price)  # Supprimez await si react_to_price_update n’est pas asynchrone
 
         logging.info("Démarrage du WebSocket pour les symboles :")
 
@@ -160,10 +161,14 @@ class TradingBot:
                                 try:
                                     msg = await ws.recv()
                                     msg = json.loads(msg)
-                                    await process_message(msg)
+                                    if msg is not None:  # Assurez-vous que le message n'est pas None
+                                        await process_message(msg)  # Assurez-vous que process_message est async si await est utilisé
                                 except websockets.ConnectionClosed:
                                     logging.warning(f"Reconnexion WebSocket pour {symbol} en raison d'une déconnexion.")
                                     break
+                                except TypeError as e:
+                                    logging.error(f"TypeError dans WebSocket pour {symbol}: {e}")
+                                    break  # Ajoutez une sortie ou une gestion spécifique pour TypeError
                     except Exception as e:
                         logging.error(f"Erreur de connexion WebSocket pour {symbol}: {e}")
                         await asyncio.sleep(5)  # Attendre avant de réessayer
@@ -239,14 +244,15 @@ class TradingBot:
     def generate_report(self):
         """Génère un rapport de performance du bot et l'envoie via Telegram"""
         try:
-            if not self.trades:  # Vérifie que trades n'est pas vide
+            if not self.trades:
                 logging.info("Aucun trade disponible pour le rapport.")
                 return
 
             profits = sum([trade['profit'] for trade in self.trades if 'profit' in trade])
-            sharpe_ratio = self.calculate_sharpe_ratio(self.trades)
-            max_drawdown = self.calculate_max_drawdown(self.trades)
+            sharpe_ratio = self.calculate_sharpe_ratio(self.trades) if len(self.trades) > 1 else 0
+            max_drawdown = self.calculate_max_drawdown(self.trades) if len(self.trades) > 1 else 0
             success_rate = self.calculate_success_rate(self.trades)
+
             report = (f"Performance des dernières 24h:\n"
                       f"Profits totaux: {profits}\n"
                       f"Sharpe Ratio: {sharpe_ratio:.2f}\n"
@@ -311,8 +317,6 @@ class TradingBot:
             logging.error("Erreur lors de la sauvegarde des données de trade: %s", e)
 
 # Initialisation
-logging.info("Initialisation du bot de trading")
-bot = TradingBot(BINANCE_API_KEY, BINANCE_SECRET_KEY, TELEGRAM_TOKEN, TELEGRAM_CHAT_ID)
 if __name__ == "__main__":
     logging.info("Initialisation du bot de trading")
     bot = TradingBot(BINANCE_API_KEY, BINANCE_SECRET_KEY, TELEGRAM_TOKEN, TELEGRAM_CHAT_ID)
