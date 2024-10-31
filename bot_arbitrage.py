@@ -130,7 +130,7 @@ class TradingBot:
         logging.info("Démarrage du WebSocket pour les symboles :")
         for symbol in symbols:
             logging.info(f"Connexion WebSocket pour le symbole : {symbol}")
-            self.socket = self.bm.symbol_ticker_socket(symbol, process_message)
+            self.socket = self.bm.symbol_ticker_socket(symbol)  # Supprimez "process_message" ici
             self.bm.start()
 
     def react_to_price_update(self, symbol, price):
